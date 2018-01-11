@@ -19,6 +19,7 @@ import config from './lib/Config';
 import restClient from './lib/RestClient';
 import wsClient from './lib/WsClient';
 import serviceRegistry from './lib/ServiceRegistry';
+import starredPairs from './lib/StarredPairs';
 
 window.ctx = {hasLocalStorage:true};
 let apiKey = null;
@@ -59,7 +60,10 @@ if (window.ctx.hasLocalStorage)
             window.localStorage.removeItem('apiKey');
         }
     }
+    // load starred pairs
+    starredPairs.load();
 }
+
 // try to retrieve api key from session storage
 let value = window.sessionStorage.getItem('apiKey');
 if (null !== value)

@@ -10,6 +10,7 @@ import dateTimeHelper from '../../lib/DateTimeHelper';
 import ComponentLoadingSpinner from '../../components/ComponentLoadingSpinner';
 import ComponentLoadedTimestamp from '../../components/ComponentLoadedTimestamp';
 import dataStore from '../../lib/DataStore';
+import starredPairs from '../../lib/StarredPairs';
 
 class PairChooser extends Component
 {
@@ -71,18 +72,16 @@ constructor(props)
 
 _handleStarPair(flag)
 {
-    let key = 'starredPair:' + this.state.pair;
+
+    let key = `starredPair:${this.props.exchange}:${this.state.pair}`;
     // add to favorites
     if (flag)
     {
-        let timestamp = parseInt(new Date().getTime() / 1000);
-        let data = JSON.stringify({exchange:this.props.exchange,pair:this.state.pair,timestamp:timestamp});
-        window.localStorage.setItem(key, data);
+        starredPairs.star(this.props.exchange, this.state.pair);
     }
     else
     {
-        // remove from favorites
-        window.localStorage.removeItem(key);
+        starredPairs.unstar(this.props.exchange, this.state.pair);
     }
     this.setState((prevState, props) => {
         return {starred:flag};
@@ -198,6 +197,18 @@ _getMarketPairs(pairs, market)
     });
 }
 
+shouldComponentUpdate(nextProps, nextState)
+{
+    if (this.props.exchange != nextProps.exchange || this.props.pair != nextProps.pair ||
+        this.state.market != nextState.market || this.state.currencyFilter != nextState.currencyFilter ||
+        this.state.starred != nextState.starred
+    )
+    {
+        return true;
+    }
+    return false;
+}
+
 componentDidMount()
 {
     this._isMounted = true;
@@ -207,6 +218,8 @@ componentWillUnmount()
 {
     this._isMounted = false;
 }
+
+
 
 // nothing to do, we already know the pair
 componentWillReceiveProps(nextProps) {}
@@ -218,14 +231,12 @@ render()
         {
             return null;
         }
-        if (!window.ctx.hasLocalStorage)
+        if (!starredPairs.isSupported())
         {
             return null;
         }
-        // already starred
-        let key = 'starredPair:' + this.state.pair;
-        let value = window.localStorage.getItem(key);
-        if (null !== value)
+        // already starred ?
+        if (starredPairs.isStarred(this.props.exchange, this.state.pair))
         {
             return (
                 <button type="button" className="btn btn-link" style={{fontSize:'1.4rem'}} onClick={this._handleStarPair.bind(this, false)}>

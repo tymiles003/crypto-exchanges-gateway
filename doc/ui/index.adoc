@@ -10,7 +10,9 @@ User interface provides following access to :
 * Creation of new orders
 * Balances
 * Market Overview (an overview of all your favourite pairs)
-* Coin Market Cap (top 20 currencies)
+* MarketCap (top 20 currencies)
+* Custom WS streams creation
+* Custom alerts creation
 
 .Prices
 [caption="",link=img/tickers.png]
@@ -36,9 +38,17 @@ image::img/balances.png[My Balances,400]
 [caption="",link=img/marketOverview.png]
 image::img/marketOverview.png[Market Overview,400]
 
-.Coin Market Cap
-[caption="",link=img/coinMarketCap.png]
-image::img/coinMarketCap.png[Coin Market Cap,400]
+.MarketCap
+[caption="",link=img/marketCap.png]
+image::img/marketCap.png[MarketCap,400]
+
+.My Streams
+[caption="",link=img/myStreams.png]
+image::img/myStreams.png[My Streams,400]
+
+.My Alerts
+[caption="",link=img/myAlerts.png]
+image::img/myAlerts.png[My Alerts,400]
 
 == Installation
 
@@ -60,3 +70,22 @@ npm run clean && npm run build
 ```
 
 UI should then be available on http://127.0.0.1:8000/ui/ (assuming _gateway_ is running on _127.0.0.1:8000_)
+
+
+== Dependencies
+
+This project was made possible thanks to following projects :
+
+* link:https://www.npmjs.com/package/axios[axios] for http requests
+* link:https://www.npmjs.com/package/big.js[big.js]
+* link:https://www.npmjs.com/package/bootstrap[bootstrap]
+* link:https://www.npmjs.com/package/file-saver[file-saver] to export settings
+* link:https://www.npmjs.com/package/font-awesome[font-awesome]
+* link:https://www.npmjs.com/package/history[history]
+* link:https://www.npmjs.com/package/react[react]
+* link:https://www.npmjs.com/package/react-markdown[react-markdown] to display mardown help in the views
+* link:https://www.npmjs.com/package/react-d3-basic[react-d3-basic] to build simple charts
+* link:https://www.npmjs.com/package/react-router-dom[react-router-dom]
+* link:https://www.npmjs.com/package/react-stockcharts[react-stockcharts] *THE AMAZING CHARTING LIBRARY*
+* link:https://www.npmjs.com/package/reactstrap[reactstrap] React Components for Bootstrap 4
+* link:https://www.npmjs.com/package/wolfy87-eventemitter[wolfy87-eventemitter] to dispatch events

@@ -14,34 +14,96 @@ Below config will only give access to public API (since no key/secret combinatio
         "ipaddr":"127.0.0.1",
         "port":8000
     },
+    "listenWs":{
+        /* only bind to localhost */
+        "ipaddr":"127.0.0.1",
+        "port":8001
+    },
     "ui":{
         /* enable ui : ui should be built first */
         "enabled":true
     },
     "logLevel":"warn",
-    "coinmarketcap":{
-        "enabled":true,
+    "marketCap":{
+        "enabled":true
+    },
+    "fxConverter":{
+        "enabled":true
     },
     "pushover":{
         "enabled":false,
         "user":"",
         "token":""
     },
+    "tickerMonitor":{
+        "enabled":true
+    },
     "exchanges":{
         "poloniex":{
+            "type":"poloniex",
             "enabled":true,
+            /* ws emulation for Poloniex klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "bittrex":{
+            "type":"bittrex",
             "enabled":true,
+            /* whether or not restricted pairs should be ignored */
+            "ignoreRestrictedPairs":false,
+            /* ws emulation for Bittrex klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "binance":{
+            "type":"binance",
             "enabled":true,
+            /* if true client will need to provide the pair when retrieving tickers or dealing with orders */
+            "requirePair":false,
             "key":"",
             "secret":""
+        },
+        "kucoin":{
+            "type":"kucoin",
+            "enabled":true,
+            /* ws emulation since Kucoin does not support ws */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
+            "key":"",
+            "secret":"",
+            "password":""
+        },
+        "okex":{
+            "type":"okex",
+            "enabled":true,
+            /* ws emulation for OKEx klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
+            /* if true client will need to provide the pair when dealing with orders */
+            "requirePair":false,
+            "key":"",
+            "secret":"",
+            "password":""
         }
     }
 }
@@ -58,13 +120,42 @@ Access will be restricted using the following :
 * an apikey header will be needed in every request
 * only one ip address will be allowed to access the service
 
+[NOTE]
+====
+* When _ssl_ is enabled, following file should exist in ssl sub directory :
+  - _certificate.key_ (private key)
+  - _certificate.crt_ (ssl certificate)
+  - _ca.crt_ (optional) (intermediate certificate, not needed when using _self-signed_ certificate)
+====
+
 [source,json]
 ----
 {
     "listen":{
         /* listen to all ip addresses */
         "ipaddr":"*",
-        "port":8000
+        "port":8000,
+        /* used to indicates the external endpoint used to reach http socket, in case gateway is running behing a proxy */
+        "externalEndpoint":"",
+        /* in case you want to enable https */
+        "ssl":true
+    },
+    "listenWs":{
+        /* only bind to localhost */
+        "ipaddr":"127.0.0.1",
+        "port":8001,
+        /* used to indicates the external endpoint used to reach ws socket, in case gateway is running behing a proxy */
+        "externalEndpoint":"",
+        /* in case you want to enable wss */
+        "ssl":true
+    },
+    "sessions":{
+        /* maximum number of subscriptions per session (0 means no maximum) */
+        "maxSubscriptions":0,
+        /* maximum session duration in seconds (it will be automatically removed after) (0 means no maximum) */
+        "maxDuration":0,
+        /* whether or not ip address should be hidden when listing sessions */
+        "hideIpaddr":false
     },
     "ui":{
         /* enable ui : ui should be built first */
@@ -91,16 +182,13 @@ Access will be restricted using the following :
             "allow":["145.26.47.14"]
         }
     },
-    /* CoinMarketCap configuration */
-    "coinmarketcap":{
+    /* MarketCap configuration */
+    "marketCap":{
         "enabled":true,
-        /* rate limiting to comply with CoinMarketCap */
-        "throttle":{
-            "publicApi":{
-                /* one request every 6 seconds */
-                "minPeriod":6
-            }
-        }
+    },
+    /* fxConverter configuration */
+    "fxConverter":{
+        "enabled":true,
     },
     /* PushOver configuration */
     "pushover":{
@@ -110,14 +198,35 @@ Access will be restricted using the following :
         /* Token provided by PushOver (required if 'enabled' is 'true')
         "token":"azfdkcafb8ynexae7wwdmb4erc71as"
     },
+    /* Ticker Monitor configuration */
+    "tickerMonitor":{
+        "enabled":true
+        /* How often (in seconds) gateway should check if conditions are met (default = 30)*/
+        "delay":30,
+        /* maximum number of conditions per alert (0 means no maximum) */
+        "maxConditions":0,
+        /* maximum alert duration in seconds (0 means no maximum) */
+        "maxDuration":0
+    },
     /* exchanges configuration */
     "exchanges":{
         "poloniex":{
+            "type":"poloniex",
+            "name":"Poloniex",
             "enabled":true,
+            /* ws emulation for Poloniex klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
             /* API key provided by Poloniex */
             "key":"ABCD",
             /* Secret provided by Poloniex */
             "secret":"EFGH",
+            /* % fees [0,100] */
+            "feesPercent":0.25,
             /* rate limiting to comply with Poloniex */
             "throttle":{
                 "publicApi":{
@@ -130,38 +239,132 @@ Access will be restricted using the following :
         },
         "bittrex":{
             "enabled":true,
-            /* to account for clock skew */
-            "recvWindow":5000,
+            /* whether or not restricted pairs should be ignored */
+            "ignoreRestrictedPairs":false,
+            "type":"bittrex",
+            "name":"bittrex",
+            /* ws emulation for Bittrex klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
             /* API key provided by Bittrex */
             "key":"ABCD",
             /* Secret provided by Bittrex */
             "secret":"EFGH",
+            /* % fees [0,100] */
+            "feesPercent":0.25,
             /* rate limiting to comply with Bittrex */
             "throttle":{
-                "lowIntensity":{
-                    /* one request every second */
-                    "minPeriod":1
-                },
-                "mediumIntensity":{
-                    /* one request every 10 seconds */
-                    "minPeriod":10
-                },
-                "highIntensity":{
-                    /* one request every 30 seconds */
-                    "minPeriod":30
+                "global":{
+                    "maxRequestsPerSecond":1
                 }
             }
         },
+        /* it is possible to define multiple instances of same exchange */
         "binance":{
             "enabled":true,
+            "type":"binance",
+            "name":"Binance #1",
+            /* if true client will need to provide the pair when retrieving tickers or dealing with orders */
+            "requirePair":false,
             /* API key provided by Binance */
             "key":"ABCD",
             /* Secret provided by Binance */
             "secret":"EFGH",
+            /* to account for clock skew */
+            "recvWindow":5000,
+            /* % fees [0,100] */
+            "feesPercent":0.10,
             /* rate limiting to comply with Binance */
             "throttle":{
                 "global":{
                     "maxRequestsPerSecond":20
+                }
+            }
+        },
+        "binance2":{
+            "enabled":true,
+            "type":"binance",
+            "name":"Binance #2",
+            /* if true client will need to provide the pair when retrieving tickers or dealing with orders */
+            "requirePair":false,
+            /* API key provided by Binance */
+            "key":"ABCD",
+            /* Secret provided by Binance */
+            "secret":"EFGH",
+            /* to account for clock skew */
+            "recvWindow":5000,
+            /* % fees [0,100] */
+            "feesPercent":0.10,
+            /* rate limiting to comply with Binance */
+            "throttle":{
+                "global":{
+                    "maxRequestsPerSecond":20
+                }
+            }
+        },
+        "kucoin":{
+            "enabled":true,
+            "type":"kucoin",
+            "name":"Kucoin",
+            /* can be set to 'true' to debug REST requests & responses */
+            "verbose":false,
+            /* timeout in ms for REST requests */
+            "timeout":10000,
+            /* ws emulation since Kucoin does not support ws */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
+            /* API key provided by Kucoin */
+            "key":"ABCD",
+            /* Secret provided by Kucoin */
+            "secret":"EFGH",
+            /* Password defined on Kucoin */
+            "password":"IJKL",
+            /* % fees [0,100] */
+            "feesPercent":0.10,
+            /* rate limiting to comply with Kucoin */
+            "throttle":{
+                "global":{
+                    "maxRequestsPerSecond":10
+                }
+            }
+        },
+        "okex":{
+            "enabled":true,
+            "type":"okex",
+            "name":"OKEx",
+            /* can be set to 'true' to debug REST requests & responses */
+            "verbose":false,
+            /* timeout in ms for REST requests */
+            "timeout":10000,
+            /* if true client will need to provide the pair when dealing with orders */
+            "requirePair":false,
+            /* ws emulation for OKEx klines */
+            "emulatedWs":{
+                "wsKlines":{
+                    /* whether or not ws emulation should be enabled for klines */
+                    "enabled":true
+                }
+            },
+            /* API key provided by OKEx */
+            "key":"ABCD",
+            /* Secret provided by OKEx */
+            "secret":"EFGH",
+            /* Password defined on OKex */
+            "password":"IJKL",
+            /* % fees [0,100] */
+            "feesPercent":0.20,
+            /* rate limiting to comply with OKEx */
+            "throttle":{
+                "global":{
+                    "maxRequestsPerSecond":3
                 }
             }
         }
@@ -192,7 +395,7 @@ Example for *GET* _/server/logLevel_
 
 === Mandatory query parameters
 
-[cols="1,1a,1a,3a", options="header"]
+[cols="1,1a,1a", options="header"]
 |===
 
 |Name
@@ -200,7 +403,7 @@ Example for *GET* _/server/logLevel_
 |Description
 
 |value
-|string
+|string (_error,warn,info,verbose,debug_)
 |New log level
 
 |===

@@ -6,10 +6,8 @@ import {
   DropdownMenu,
   DropdownItem,
 } from "reactstrap";
-import dateTimeHelper from '../../lib/DateTimeHelper';
-import ComponentLoadingSpinner from '../../components/ComponentLoadingSpinner';
-import ComponentLoadedTimestamp from '../../components/ComponentLoadedTimestamp';
 import dataStore from '../../lib/DataStore';
+import starredPairs from '../../lib/StarredPairs';
 
 class PairChooser extends Component
 {
@@ -71,18 +69,16 @@ constructor(props)
 
 _handleStarPair(flag)
 {
-    let key = 'starredPair:' + this.state.pair;
+
+    let key = `starredPair:${this.props.exchange}:${this.state.pair}`;
     // add to favorites
     if (flag)
     {
-        let timestamp = parseInt(new Date().getTime() / 1000);
-        let data = JSON.stringify({exchange:this.props.exchange,pair:this.state.pair,timestamp:timestamp});
-        window.localStorage.setItem(key, data);
+        starredPairs.star(this.props.exchange, this.state.pair);
     }
     else
     {
-        // remove from favorites
-        window.localStorage.removeItem(key);
+        starredPairs.unstar(this.props.exchange, this.state.pair);
     }
     this.setState((prevState, props) => {
         return {starred:flag};
@@ -100,11 +96,18 @@ _handleSetCurrencyFilter(event)
 {
     let filter = event.target.value.trim().toUpperCase();
     let list = [];
-    if ('' != filter)
+    // extract currency if needed
+    let currency = filter;
+    let index = filter.indexOf('-');
+    if (-1 !== index)
+    {
+        currency = currency.substr(index + 1);
+    }
+    if ('' != currency)
     {
         _.forEach(this.state.pairs, (e) => {
             // found matching pair
-            if (-1 != e.currency.indexOf(filter))
+            if (-1 != e.currency.toUpperCase().indexOf(currency))
             {
                 list.push(e.pair);
             }
@@ -137,8 +140,9 @@ _handleSelectFilteredPair(event)
     let arr = pair.split('-');
     let market = arr[0];
     let marketPairs = this._getMarketPairs(this.state.pairs, market);
+    let starred = starredPairs.isStarred(this.props.exchange, pair);
     this.setState((prevState, props) => {
-        return {market:market,marketPairs:marketPairs,pair:pair,currencyFilter:'',filteredCurrencies:[]};
+        return {market:market,marketPairs:marketPairs,pair:pair,currencyFilter:'',filteredCurrencies:[],starred:starred};
     }, function(){
         // update datastore
         dataStore.setExchangeData(this.props.exchange, 'pair', pair);
@@ -157,8 +161,13 @@ _handleSelectPair(event)
     {
         pair = null;
     }
+    let starred = false;
+    if (null !== pair)
+    {
+        starred = starredPairs.isStarred(this.props.exchange, pair);
+    }
     this.setState((prevState, props) => {
-        return {pair:pair};
+        return {pair:pair,starred:starred};
     }, function(){
         // update datastore
         dataStore.setExchangeData(this.props.exchange, 'pair', pair);
@@ -198,6 +207,18 @@ _getMarketPairs(pairs, market)
     });
 }
 
+shouldComponentUpdate(nextProps, nextState)
+{
+    if (this.props.exchange != nextProps.exchange || this.props.pair != nextProps.pair ||
+        this.state.market != nextState.market || this.state.currencyFilter != nextState.currencyFilter ||
+        this.state.starred != nextState.starred
+    )
+    {
+        return true;
+    }
+    return false;
+}
+
 componentDidMount()
 {
     this._isMounted = true;
@@ -209,7 +230,26 @@ componentWillUnmount()
 }
 
 // nothing to do, we already know the pair
-componentWillReceiveProps(nextProps) {}
+componentWillReceiveProps(nextProps)
+{
+    let isNewPair = true;
+    if (nextProps.exchange === this.props.exchange && nextProps.pair === this.props.pair)
+    {
+        isNewPair = false;
+    }
+    this.setState(function(prevState, props){
+        return {
+            exchange:nextProps.exchange,
+            pair:nextProps.pair,
+            pairs:nextProps.pairs
+        };
+    }, function(){
+        if (null !== this.state.pair && isNewPair)
+        {
+            dataStore.setExchangeData(this.state.exchange, 'pair', this.state.pair);
+        }
+    });
+}
 
 render()
 {
@@ -218,14 +258,12 @@ render()
         {
             return null;
         }
-        if (!window.ctx.hasLocalStorage)
+        if (!starredPairs.isSupported())
         {
             return null;
         }
-        // already starred
-        let key = 'starredPair:' + this.state.pair;
-        let value = window.localStorage.getItem(key);
-        if (null !== value)
+        // already starred ?
+        if (starredPairs.isStarred(this.props.exchange, this.state.pair))
         {
             return (
                 <button type="button" className="btn btn-link" style={{fontSize:'1.4rem'}} onClick={this._handleStarPair.bind(this, false)}>
@@ -293,7 +331,7 @@ render()
 
     return (
         <div>
-            <InputGroup style={{maxWidth:"250px",marginBottom:'5px'}}>
+            <InputGroup style={{maxWidth:'250px',marginBottom:'5px'}}>
               <Input type="text" placeholder="Enter currency or use menu" value={this.state.currencyFilter} onChange={this._handleSetCurrencyFilter.bind(this)}/>
               <button type="button" className="input-group-addon btn btn-link" onClick={this._handleClearCurrencyFilter.bind(this)}>
                   <i className="fa fa-remove" style={{fontSize:'1rem'}}></i>

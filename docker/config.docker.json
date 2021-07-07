@@ -1,13 +1,22 @@
 {
     "listen":{
         "ipaddr":"*",
-        "port":8000
+        "port":8000,
+        "externalEndpoint":""
+    },
+    "listenWs":{
+        "ipaddr":"*",
+        "port":8001,
+        "externalEndpoint":""
     },
     "ui":{
         "enabled":true
     },
-    "logLevel":"warn",
-    "coinmarketcap":{
+    "logLevel":"info",
+    "marketCap":{
+        "enabled":true
+    },
+    "fxConverter":{
         "enabled":true
     },
     "pushover":{
@@ -15,19 +24,69 @@
         "user":"",
         "token":""
     },
+    "tickerMonitor":{
+        "enabled":true
+    },
     "exchanges":{
         "poloniex":{
             "enabled":true,
+            "type":"poloniex",
+            "name":"Poloniex",
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "bittrex":{
             "enabled":true,
+            "type":"bittrex",
+            "name":"Bittrex",
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "binance":{
+            "type":"binance",
+            "name":"Binance",
             "enabled":true,
+            "requirePair":false,
+            "key":"",
+            "secret":""
+        },
+        "kucoin":{
+            "type":"kucoin",
+            "name":"Kucoin",
+            "enabled":true,
+            "verbose":false,
+            "timeout":10000,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
+            "key":"",
+            "secret":"",
+            "password":""
+        },
+        "okex":{
+            "type":"okex",
+            "name":"OKEx",
+            "enabled":true,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
+            "verbose":false,
+            "timeout":10000,
+            "requirePair":false,
             "key":"",
             "secret":""
         }

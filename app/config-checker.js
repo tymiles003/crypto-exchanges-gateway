@@ -7,16 +7,25 @@ const AbstractConfigCheckerClass = require('./abstract-config-checker');
 class ConfigChecker extends AbstractConfigCheckerClass
 {
 
-constructor()
+constructor(defaultConfig)
 {
-    let cfg = {
+    let cfg;
+    cfg = {
         listen:{
             ipaddr:'*',
-            port:8000
+            port:8000,
+            ssl:false
+        },
+        listenWs:{
+            ipaddr:'*',
+            port:8001,
+            ssl:false
         },
         logLevel:'warn',
         auth:{
-            trustProxy:false,
+            trustProxy:{
+                enabled:false
+            },
             apiKey:{
                 enabled:false,
                 key:''
@@ -26,26 +35,38 @@ constructor()
                 allow:[]
             }
         },
+        userAgent:{
+            value:"Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1"
+        },
         ui:{
            enabled:false
         },
-        coinmarketcap:{
+        marketCap:{
+            enabled:false
+        },
+        fxConverter:{
             enabled:false
         },
         pushover:{
             enabled:false
         },
-        exchanges:{
-            binance:{
-                enabled:true
-            },
-            bittrex:{
-                enabled:true
-            },
-            poloniex:{
-                enabled:true
-            }
-        }
+        tickerMonitor:{
+            enabled:false
+        },
+        sessions:{
+            // maximum number of subscriptions in a session
+            maxSubscriptions:0,
+            // maximum duration of a session in seconds (it will be automatically removed after)
+            maxDuration:0,
+            // whether or not ip address should be hidden when listing sessions
+            hideIpaddr:false
+
+        },
+        exchanges:{}
+    }
+    if (undefined !== defaultConfig)
+    {
+        _.defaultsDeep(cfg, defaultConfig)
     }
     super(cfg);
 }
@@ -54,6 +75,23 @@ _check()
 {
     let valid = true;
     if (!this._checkListen())
+    {
+        valid = false;
+    }
+    if (!this._checkListenWs())
+    {
+        valid = false;
+    }
+    // ensure we don't try to run http & ws on same endpoint
+    if (this._finalConfig.listen.port == this._finalConfig.listenWs.port)
+    {
+        if ('*' == this._finalConfig.listen.ipaddr || '*' == this.finalConfig.listenWs.ipaddr || this._finalConfig.listen.ipaddr == this.finalConfig.listenWs.ipaddr)
+        {
+            this._err("Cannot run both http and websocket on same ip/port combination");
+            valid = false;
+        }
+    }
+    if (!this._checkUserAgent())
     {
         valid = false;
     }
@@ -69,11 +107,23 @@ _check()
     {
         valid = false;
     }
-    if (!this._checkCoinMarketCap())
+    if (!this._checkMarketCap())
+    {
+        valid = false;
+    }
+    if (!this._checkFxConverter())
+    {
+        valid = false;
+    }
+    if (!this._checkTickerMonitor())
     {
         valid = false;
     }
     if (!this._checkPushOver())
+    {
+        valid = false;
+    }
+    if (!this._checkSessions())
     {
         valid = false;
     }
@@ -106,29 +156,80 @@ _checkUi()
     return valid;
 }
 
-_checkCoinMarketCap()
+_checkMarketCap()
 {
     let valid = true;
-    const checkerClass = require('./coinmarketcap/config-checker');
+    const checkerClass = require('./marketCap/config-checker');
     let checker = new checkerClass();
     let config = {};
-    if (undefined !== this._config.coinmarketcap)
+    if (undefined !== this._config.marketCap)
     {
-        config = this._config.coinmarketcap;
+        config = this._config.marketCap;
     }
     if (!checker.check(config))
     {
         // mark config as invalid
         valid = false;
-        let self = this;
         // copy errors
-        _.forEach(checker.getErrors(), function(err){
-            self._err(err);
+        _.forEach(checker.getErrors(), (err) => {
+            this._err(err);
         });
     }
     else
     {
-        this._finalConfig.coinmarketcap = checker.getCfg();
+        this._finalConfig.marketCap = checker.getCfg();
+    }
+    return valid;
+}
+
+_checkFxConverter()
+{
+    let valid = true;
+    const checkerClass = require('./fxConverter/config-checker');
+    let checker = new checkerClass();
+    let config = {};
+    if (undefined !== this._config.fxConverter)
+    {
+        config = this._config.fxConverter;
+    }
+    if (!checker.check(config))
+    {
+        // mark config as invalid
+        valid = false;
+        // copy errors
+        _.forEach(checker.getErrors(), (err) => {
+            this._err(err);
+        });
+    }
+    else
+    {
+        this._finalConfig.fxConverter = checker.getCfg();
+    }
+    return valid;
+}
+
+_checkTickerMonitor()
+{
+    let valid = true;
+    const checkerClass = require('./tickerMonitor/config-checker');
+    let checker = new checkerClass();
+    let config = {};
+    if (undefined !== this._config.tickerMonitor)
+    {
+        config = this._config.tickerMonitor;
+    }
+    if (!checker.check(config))
+    {
+        // mark config as invalid
+        valid = false;
+        // copy errors
+        _.forEach(checker.getErrors(), (err) => {
+            this._err(err);
+        });
+    }
+    else
+    {
+        this._finalConfig.tickerMonitor = checker.getCfg();
     }
     return valid;
 }
@@ -147,10 +248,9 @@ _checkPushOver()
     {
         // mark config as invalid
         valid = false;
-        let self = this;
         // copy errors
-        _.forEach(checker.getErrors(), function(err){
-            self._err(err);
+        _.forEach(checker.getErrors(), (err) => {
+            this._err(err);
         });
     }
     else
@@ -160,44 +260,131 @@ _checkPushOver()
     return valid;
 }
 
+_checkSessions()
+{
+    let valid = true;
+    if (undefined === this._config.sessions)
+    {
+        return true;
+    }
+    if (undefined !== this._config.sessions.maxSubscriptions)
+    {
+        let value = parseInt(this._config.sessions.maxSubscriptions);
+        if (isNaN(value) || value < 0)
+        {
+            this._invalid({name:'sessions.maxSubscriptions',value:this._config.sessions.maxSubscriptions});
+            valid = false;
+        }
+        else
+        {
+            this._finalConfig.sessions.maxSubscriptions = value;
+        }
+    }
+    if (undefined !== this._config.sessions.maxDuration)
+    {
+        let value = parseInt(this._config.sessions.maxDuration);
+        if (isNaN(value) || value < 0)
+        {
+            this._invalid({name:'sessions.maxDuration',value:this._config.sessions.maxDuration});
+            valid = false;
+        }
+        else
+        {
+            this._finalConfig.sessions.maxDuration = value;
+        }
+    }
+    if (true === this._config.sessions.hideIpaddr)
+    {
+        this._finalConfig.sessions.hideIpaddr = true;
+    }
+    return valid;
+}
+
 _checkExchanges()
 {
     let valid = true;
+    // by default no exchange is enabled
     if (undefined === this._config.exchanges)
     {
         this._config.exchanges = this._defaultConfig.exchanges;
     }
     // try to load all config-checker.js file in exchanges directory
     let exchangesDir = path.join(__dirname, 'exchanges');
-    _.forEach(fs.readdirSync(exchangesDir), (e) => {
-        let file = path.join(exchangesDir, e, 'config-checker.js');
+    let configCheckers = {};
+    _.forEach(fs.readdirSync(exchangesDir), (exchangeId) => {
+        let file = path.join(exchangesDir, exchangeId, 'config-checker.js');
         if (fs.existsSync(file))
         {
-            let name = path.basename(e);
             const checkerClass = require(file);
-            let checker = new checkerClass();
-            let config = {};
-            if (undefined !== this._config.exchanges[name])
+            configCheckers[exchangeId] = checkerClass;
+        }
+    });
+    let index = 0;
+    let exchangeTypes = {};
+    _.forEach(this._config.exchanges, (exchangeConfig, exchangeId) => {
+        ++index;
+        if (undefined === exchangeConfig.type)
+        {
+            exchangeConfig.type = exchangeId;
+        }
+        if (undefined === configCheckers[exchangeConfig.type])
+        {
+            this._err(`Unsupported exchange type '${exchangeConfig.type}' for exchange #${index} '${exchangeId}'`);
+            valid = false;
+            return;
+        }
+        const checkerClass = configCheckers[exchangeConfig.type];
+        // keep track of all exchange types 'cause some might not allow multiple instances
+        if (undefined === exchangeTypes[exchangeConfig.type])
+        {
+            exchangeTypes[exchangeConfig.type] = 0;
+        }
+        ++exchangeTypes[exchangeConfig.type];
+        // check if multiple instances are allowed
+        if (exchangeTypes[exchangeConfig.type] > 1)
+        {
+            if (!checkerClass.MULTIPLE_INSTANCES)
             {
-                config = this._config.exchanges[name];
-            }
-            if (!checker.check(config))
-            {
-                // mark config as invalid
+                this._err(`Exchange type '${exchangeConfig.type}' does not support multiple instances`);
                 valid = false;
-                let self = this;
-                // copy errors
-                _.forEach(checker.getErrors(), function(err){
-                    self._err(err);
-                });
+                return;
             }
-            else
-            {
-                this._finalConfig.exchanges[name] = checker.getCfg();
-            }
+        }
+        let checker = new checkerClass(exchangeId);
+        if (!checker.check(exchangeConfig))
+        {
+            // mark config as invalid
+            valid = false;
+            // copy errors
+            _.forEach(checker.getErrors(), (err) => {
+                this._err(err);
+            });
+        }
+        else
+        {
+            this._finalConfig.exchanges[exchangeId] = checker.getCfg();
         }
     });
     return valid;
+}
+
+_checkUserAgent()
+{
+    if (undefined === this._config.userAgent)
+    {
+        return true;
+    }
+    if (undefined === this._config.userAgent.value)
+    {
+        return true;
+    }
+    let value = this._config.userAgent.value.trim();
+    if ('' == value)
+    {
+        return true;
+    }
+    this._finalConfig.userAgent.value = value;
+    return true;
 }
 
 _checkLogLevel()
@@ -233,12 +420,31 @@ _checkAuth()
     {
         if (!this._isValidBoolean(this._config.auth.trustProxy.enabled))
         {
-            this._invalid({name:'auth.trustProxy', value:this._config.auth.trustProxy});
+            this._invalid({name:'auth.trustProxy.enabled', value:this._config.auth.trustProxy.enabled});
             valid = false;
         }
         else
         {
-            this._finalConfig.auth.trustProxy = this._config.auth.trustProxy;
+            if (true === this._config.auth.trustProxy.enabled)
+            {
+                if (undefined === this._config.auth.trustProxy.proxies)
+                {
+                    this._missing('auth.trustProxy.proxies');
+                    valid = false;
+                }
+                else
+                {
+                    if (0 == this._config.auth.trustProxy.proxies.length)
+                    {
+                        this._err("Invalid config parameter 'auth.trustProxy.proxies' (cannot be empty)");
+                        valid = false;
+                    }
+                    else
+                    {
+                        this._finalConfig.auth.trustProxy = this._config.auth.trustProxy;
+                    }
+                }
+            }
         }
     }
     if (!this._checkApiKey())
@@ -346,6 +552,81 @@ _checkListen()
         {
             this._finalConfig.listen.ipaddr = this._config.listen.ipaddr;
         }
+    }
+    //-- check if we have an external endpoint set (in case app is running behing proxy)
+    if (undefined !== this._config.listen.externalEndpoint && '' !== this._config.listen.externalEndpoint)
+    {
+        if (!this._config.listen.externalEndpoint.startsWith('http://') && !this._config.listen.externalEndpoint.startsWith('https://'))
+        {
+            this._invalid({name:'listen[externalEndpoint]',value:this._config.listen.externalEndpoint});
+            valid = false;
+        }
+        else
+        {
+            this._finalConfig.listen.externalEndpoint = this._config.listen.externalEndpoint;
+        }
+    }
+    // check if ssl can be enabled
+    if (true === this._config.listen.ssl)
+    {
+        this._finalConfig.listen.ssl = true;
+    }
+    return valid;
+}
+
+_checkListenWs()
+{
+    if (undefined === this._config.listenWs)
+    {
+        return true;
+    }
+    let valid = true;
+    // check port
+    if (undefined !== this._config.listenWs.port)
+    {
+        if (!this._isValidPort(this._config.listenWs.port))
+        {
+            this._invalid({name:'listenWs[port]',value:this._config.listenWs.port});
+            valid = false;
+        }
+        else
+        {
+            this._finalConfig.listenWs.port = parseInt(this._config.listenWs.port);
+        }
+    }
+    // check ip address
+    if (undefined !== this._config.listenWs.ipaddr)
+    {
+        if ('*' != this._config.listenWs.ipaddr)
+        {
+            if (!this._isValidIpaddr(this._config.listenWs.ipaddr))
+            {
+                this._invalid({name:'listenWs[ipaddr]',value:this._config.listenWs.ipaddr});
+                valid = false;
+            }
+        }
+        if (valid)
+        {
+            this._finalConfig.listenWs.ipaddr = this._config.listenWs.ipaddr;
+        }
+    }
+    //-- check if we have an external endpoint set (in case app is running behing proxy)
+    if (undefined !== this._config.listenWs.externalEndpoint && '' !== this._config.listenWs.externalEndpoint)
+    {
+        if (!this._config.listenWs.externalEndpoint.startsWith('ws://') && !this._config.listenWs.externalEndpoint.startsWith('wss://'))
+        {
+            this._invalid({name:'listenWs[externalEndpoint]',value:this._config.listenWs.externalEndpoint});
+            valid = false;
+        }
+        else
+        {
+            this._finalConfig.listenWs.externalEndpoint = this._config.listenWs.externalEndpoint;
+        }
+    }
+    // check if ssl can be enabled
+    if (true === this._config.listenWs.ssl)
+    {
+        this._finalConfig.listenWs.ssl = true;
     }
     return valid;
 }

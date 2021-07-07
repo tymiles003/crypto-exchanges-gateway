@@ -14,12 +14,19 @@ import '../scss/style.scss'
 import App from './App';
 import Auth from './views/Auth';
 
-// Config
+// Config & http/ws clients
 import config from './lib/Config';
 import restClient from './lib/RestClient';
+import wsClient from './lib/WsClient';
 import serviceRegistry from './lib/ServiceRegistry';
+import starredPairs from './lib/StarredPairs';
+import dataStore from './lib/DataStore';
+import standaloneContext from './lib/StandaloneContext';
 
-window.ctx = {hasLocalStorage:true};
+window.ctx = {
+    hasLocalStorage:true,
+    isMobile:/Mobile|Android|webOS|iPhone|iPad|iPod|BlackBerry|BB|PlayBook|IEMobile|Windows Phone|Kindle|Silk|Opera Mini/i.test(navigator.userAgent)
+};
 let apiKey = null;
 
 // check if localStorage is supported
@@ -58,7 +65,18 @@ if (window.ctx.hasLocalStorage)
             window.localStorage.removeItem('apiKey');
         }
     }
+    // load starred pairs
+    starredPairs.load();
+    // load standaloneContext
+    standaloneContext.load();
+    if (standaloneContext.isSupported())
+    {
+        // force route to '/' (it will be changed later based on localStorage)
+        window.location.hash = '/';
+        dataStore.updateFromStandaloneContext();
+    }
 }
+
 // try to retrieve api key from session storage
 let value = window.sessionStorage.getItem('apiKey');
 if (null !== value)
@@ -78,27 +96,38 @@ if (null !== value)
 config.load().then(function(result){
 
     // initialize rest client
-    restClient.initialize(config.config.apiEndpoint);
+    restClient.initialize(config.config.restEndpoint);
     restClient.setApiKey(apiKey);
 
     // check apiKey
-    restClient.getServerStatus().then(function(result){
-    // load available services
-    serviceRegistry.load().then(function(result){
-        // we're all setup now
-        const history = createBrowserHistory();
+    restClient.getServerStatus().then((result) => {
+        // initialize ws client
+        wsClient.initialize(config.config.wsEndpoint);
+        wsClient.setApiKey(apiKey);
 
-        ReactDOM.render((
-          <HashRouter history={history}>
-            <Switch>
-              <Route path="/" component={App}/>
-            </Switch>
-          </HashRouter>
-            ), document.getElementById('root'));
+        // load server config
+        restClient.getServerConfig().then((result) => {
+            dataStore.setData('serverConfig', result);
+
+            // load available services
+            serviceRegistry.load().then((result) => {
+                // we're all setup now
+                const history = createBrowserHistory();
+
+                ReactDOM.render((
+                    <HashRouter history={history}>
+                        <Switch>
+                            <Route path="/" component={App}/>
+                        </Switch>
+                    </HashRouter>
+                ), document.getElementById('root'));
+            });
+
         });
+
     }).catch (function(err){
         // invalid api key
-        if (undefined !== err.response && 401 == err.response.status)
+        if ('GatewayError.Forbidden' == err.extError.errorType)
         {
             ReactDOM.render((
               <Auth/>

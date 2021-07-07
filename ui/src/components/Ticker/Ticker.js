@@ -112,10 +112,23 @@ _loadData(cb)
             return;
         }
         let timestamp = new Date().getTime();
+        if (undefined === data[self.state.pair])
+        {
+            let message = `No ticker for ${self.state.pair}`;
+            console.warn(message);
+            self.setState((prevState, props) => {
+                return {loaded:true, data:null, err:message, loadedTimestamp:timestamp};
+            });
+            if (undefined !== cb)
+            {
+                cb.call(self);
+            }
+            return;
+        }
         // update window title
         try
         {
-            let title = self.state.pair + ' / ' + data[self.state.pair].last.toFixed(8);
+            let title = data[self.state.pair].last.toFixed(8) + ' / ' + self.state.pair;
             document.title = title;
         }
         catch (e)
@@ -159,11 +172,25 @@ componentWillUnmount()
 componentWillReceiveProps(nextProps)
 {
     let self = this;
+    let reload = false;
+    let newPair = undefined === nextProps.pair ? null : nextProps.pair;
+    if (nextProps.exchange !== this.props.exchange)
+    {
+        reload = true;
+    }
+    else if (this.state.pair != newPair)
+    {
+        reload = true;
+    }
     this.setState((prevState, props) => {
         return {
-            pair:undefined === nextProps.pair ? null : nextProps.pair
+            pair:newPair
         }
     }, function(){
+        if (!reload)
+        {
+            return;
+        }
         self._reloadData(function(){
             this._startAutoRefresh();
         });
@@ -231,10 +258,12 @@ render()
        )
     }
 
-    const TickerRow = () => {
-        if (null !== this.state.err)
+    const getChange = () => {
+        if (null === this.state.data.priceChangePercent)
         {
-            return null;
+            return (
+                <span style={{color:'#e64400'}}>N/A</span>
+            );
         }
         let className_percent_change = '';
         if (this.state.data.priceChangePercent < 0)
@@ -245,15 +274,50 @@ render()
         {
             className_percent_change = 'text-success';
         }
+        return (
+            <span className={className_percent_change}>{this.state.data.priceChangePercent.toFixed(3)} %</span>
+        );
+    }
+
+    const getBuyPrice = (url) => {
+        if (null === this.state.data.buy)
+        {
+            return (
+                <span style={{color:'#e64400'}}>N/A</span>
+            );
+        }
+        let a = this.state.data.buy.toFixed(8);
+        return (
+            <a href={url}>{this.state.data.buy.toFixed(8)}</a>
+        );
+    }
+
+    const getSellPrice = (url) => {
+        if (null === this.state.data.sell)
+        {
+            return (
+                <span style={{color:'#e64400'}}>N/A</span>
+            );
+        }
+        return (
+            <a href={url}>{this.state.data.sell.toFixed(8)}</a>
+        );
+    }
+
+    const TickerRow = () => {
+        if (null !== this.state.err)
+        {
+            return null;
+        }
         let url = this._baseUrl + this.props.pair;
         return (
             <tr key="1">
               <td className="text-right"><a href={url}>{this.state.data.last.toFixed(8)}</a></td>
-              <td className="text-right"><a href={url}>{this.state.data.buy.toFixed(8)}</a></td>
-              <td className="text-right"><a href={url}>{this.state.data.sell.toFixed(8)}</a></td>
+              <td className="text-right">{getBuyPrice(url)}</td>
+              <td className="text-right">{getSellPrice(url)}</td>
               <td className="text-right">{this.state.data.high.toFixed(8)}</td>
               <td className="text-right">{this.state.data.low.toFixed(8)}</td>
-              <td className="text-right"><span className={className_percent_change}>{this.state.data.priceChangePercent.toFixed(3)} %</span></td>
+              <td className="text-right">{getChange()}</td>
               <td className="text-right">{this.state.data.volume.toFixed(8)}</td>
            </tr>
        )

@@ -2,8 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const express = require('express');
+const compression = require('compression');
+const http = require('http');
+const https = require('https');
 const bodyParser = require('body-parser');
 const ConfigChecker = require('./app/config-checker');
+const storage = require('./app/storage');
+const sessionRegistry = require('./app/session-registry');
+const internalConfig = require('./app/internal-config');
 const _ = require('lodash');
 const logger = require('winston');
 
@@ -23,6 +29,7 @@ logger.configure({
 });
 // default log level is warn
 logger.level = 'warn';
+logger.warn("Starting...");
 // function to check if level is enabled
 logger.isLevel = function(level)
 {
@@ -30,10 +37,9 @@ logger.isLevel = function(level)
 }
 
 //-- load config
-const checker = new ConfigChecker();
-
-var config = {};
-var configFile = path.join(__dirname, 'config/config.json');
+let config = {};
+let configPath = 'config/config.json';
+let configFile = path.join(__dirname, configPath);
 if (fs.existsSync(configFile))
 {
     try
@@ -42,15 +48,16 @@ if (fs.existsSync(configFile))
     }
     catch (e)
     {
-        logger.error("Config file '%s' is not a valid JSON file", configFile);
+        logger.error("Config file '%s' is not a valid JSON file", configPath);
         process.exit(1);
     }
 }
 
 // retrieve config from checker
+let checker = new ConfigChecker();
 if (!checker.check(config))
 {
-    logger.error("Config file is invalid");
+    logger.error("Config file '%s' is invalid", configPath);
     _.forEach(checker.getErrors(), function (err) {
         logger.error(err);
     });
@@ -58,23 +65,128 @@ if (!checker.check(config))
 }
 config = checker.getCfg();
 
-// add log if CoinMarketCap is enabled
-if (config.coinmarketcap.enabled)
+//-- load custom config (only useful in docker containers, to override default config)
+let hasCustomConfig = false;
+configPath = 'custom_config/config.json';
+configFile = path.join(__dirname, configPath);
+if (fs.existsSync(configFile))
 {
-    logger.warn("CoinMarketCap API is enabled");
+    hasCustomConfig = true;
+    let customConfig;
+    try
+    {
+        customConfig = require(configFile);
+    }
+    catch (e)
+    {
+        logger.error("Config file '%s' is not a valid JSON file", configPath);
+        process.exit(1);
+    }
+    // retrieve config from checker
+    checker = new ConfigChecker(config);
+    if (!checker.check(customConfig))
+    {
+        logger.error("Config file '%s' is invalid", configPath);
+        _.forEach(checker.getErrors(), function (err) {
+            logger.error(err);
+        });
+        process.exit(1);
+    }
+    config = checker.getCfg();
 }
 
 //-- update config based on environment (used when using docker container)
-// check exchanges config
-_.forEach(config.exchanges, function(obj, exchange) {
-    let key = process.env[util.format('cfg.exchanges.%s.key', exchange)];
-    let secret = process.env[util.format('cfg.exchanges.%s.secret', exchange)];
-    if (undefined !== key && '' != key && undefined !== secret && '' != secret)
+
+//-- check Market Cap
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    let enableMarketCap = process.env['cfg.marketCap.enabled'];
+    if (undefined !== enableMarketCap && '' !== enableMarketCap)
     {
-        config.exchanges[exchange]['key'] = key;
-        config.exchanges[exchange]['secret'] = secret;
+        if ('true' == enableMarketCap || '1' == enableMarketCap)
+        {
+            config.marketCap.enabled = true;
+        }
+        else if ('false' == enableMarketCap || '0' == enableMarketCap)
+        {
+            config.marketCap.enabled = false;
+        }
     }
-});
+}
+// add log if Market Cap is enabled
+if (config.marketCap.enabled)
+{
+    logger.warn("MarketCap API is enabled");
+}
+
+//-- check Fx Converter
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    let enableFxConverter = process.env['cfg.fxConverter.enabled'];
+    if (undefined !== enableFxConverter && '' !== enableFxConverter)
+    {
+        if ('true' == enableFxConverter || '1' == enableFxConverter)
+        {
+            config.fxConverter.enabled = true;
+        }
+        else if ('false' == enableFxConverter || '0' == enableFxConverter)
+        {
+            config.fxConverter.enabled = false;
+        }
+    }
+}
+// add log if Market Cap is enabled
+if (config.fxConverter.enabled)
+{
+    logger.warn("FxConverter API is enabled");
+}
+
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    _.forEach(config.exchanges, function(obj, exchange) {
+        let enableExchange = process.env[util.format('cfg.exchanges.%s.enabled', exchange)];
+        if (undefined !== enableExchange && '' !== enableExchange)
+        {
+            if ('true' == enableExchange || '1' == enableExchange)
+            {
+                config.exchanges[exchange]['enabled'] = true;
+            }
+            else if ('false' == enableExchange || '0' == enableExchange)
+            {
+                config.exchanges[exchange]['enabled'] = false;
+            }
+        }
+        if (config.exchanges[exchange]['enabled'])
+        {
+            let key = process.env[util.format('cfg.exchanges.%s.key', exchange)];
+            let secret = process.env[util.format('cfg.exchanges.%s.secret', exchange)];
+            if (undefined !== key && '' != key && undefined !== secret && '' != secret)
+            {
+                config.exchanges[exchange]['key'] = key;
+                config.exchanges[exchange]['secret'] = secret;
+            }
+            // check if requirePair is supported
+            if (config.exchanges[exchange].hasOwnProperty('requirePair'))
+            {
+                let requirePair = process.env[util.format('cfg.exchanges.%s.requirePair', exchange)];
+                if (undefined !== requirePair && '' !== requirePair)
+                {
+                    if ('true' == requirePair || '1' == requirePair)
+                    {
+                        config.exchanges[exchange]['requirePair'] = true;
+                    }
+                    else if ('false' == requirePair || '0' == requirePair)
+                    {
+                        config.exchanges[exchange]['requirePair'] = false;
+                    }
+                }
+            }
+        }
+    });
+}
 // log which exchanges are enabled
 _.forEach(config.exchanges, function(obj, exchange) {
     if (config.exchanges[exchange]['enabled'])
@@ -83,37 +195,41 @@ _.forEach(config.exchanges, function(obj, exchange) {
         {
             if ('demo' == config.exchanges[exchange]['key'] && 'demo' == config.exchanges[exchange]['secret'])
             {
-                logger.warn("%s exchange is enabled (public API & trading API)(DEMO)", exchange);
+                logger.warn("%s exchange (%s) is enabled (public API & trading API)(DEMO)", exchange, obj.type);
             }
             else
             {
-                logger.warn("%s exchange is enabled (public API & trading API)", exchange);
+                logger.warn("%s exchange (%s) is enabled (public API & trading API)", exchange, obj.type);
             }
         }
         else
         {
-            logger.warn("%s exchange is enabled (public API)", exchange);
+            logger.warn("%s exchange (%s) is enabled (public API)", exchange, obj.type);
         }
     }
 });
 
 //-- check ui config
-let enableUi = process.env['cfg.ui.enabled'];
-if (undefined !== enableUi && '' !== enableUi)
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
 {
-    if (true === enableUi || '1' == enableUi)
+    let enableUi = process.env['cfg.ui.enabled'];
+    if (undefined !== enableUi && '' !== enableUi)
     {
-        config.ui.enabled = true;
-    }
-    else if (false === enableUi || '0' == enableUi)
-    {
-        config.ui.enabled = false;
+        if ('true' == enableUi || '1' == enableUi)
+        {
+            config.ui.enabled = true;
+        }
+        else if ('false' == enableUi || '0' == enableUi)
+        {
+            config.ui.enabled = false;
+        }
     }
 }
 // ensure ui has been built
 if (config.ui.enabled)
 {
-    var uiBundleFile = path.join(__dirname, 'ui/dist/index.bundle.js');
+    let uiBundleFile = path.join(__dirname, 'ui/dist/build.timestamp');
     if (!fs.existsSync(uiBundleFile))
     {
         config.ui.enabled = false;
@@ -122,17 +238,26 @@ if (config.ui.enabled)
 }
 if (config.ui.enabled)
 {
+    // save UI endpoint in internalConfig (this requires config.listen.externalEndpoint to be defined)
+    if (undefined !== config.listen.externalEndpoint && '' != config.listen.externalEndpoint)
+    {
+        internalConfig.set('uiEndpoint', `${config.listen.externalEndpoint}/ui`);
+    }
     logger.warn("UI is enabled");
 }
 
 //-- check pushover config
-let pushoverUser = process.env['cfg.pushover.user'];
-let pushoverToken = process.env['cfg.pushover.token'];
-if (undefined !== pushoverUser && '' != pushoverUser && undefined !== pushoverToken && '' != pushoverToken)
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
 {
-    config.pushover.enabled = true;
-    config.pushover.user = pushoverUser;
-    config.pushover.token = pushoverToken;
+    let pushoverUser = process.env['cfg.pushover.user'];
+    let pushoverToken = process.env['cfg.pushover.token'];
+    if (undefined !== pushoverUser && '' != pushoverUser && undefined !== pushoverToken && '' != pushoverToken)
+    {
+        config.pushover.enabled = true;
+        config.pushover.user = pushoverUser;
+        config.pushover.token = pushoverToken;
+    }
 }
 // add log if push over is enabled
 if (config.pushover.enabled && '' != config.pushover.user && '' != config.pushover.token)
@@ -140,71 +265,305 @@ if (config.pushover.enabled && '' != config.pushover.user && '' != config.pushov
     logger.warn("PushOver API is enabled");
 }
 
-//-- check api key
-let apiKey = process.env['cfg.auth.apikey'];
-if (undefined !== apiKey && '' != apiKey)
+//-- check tickerMonitor config
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
 {
-    config.auth.apiKey.enabled = true;
-    config.auth.apiKey.key = apiKey;
+    let enableTickerMonitor = process.env['cfg.tickerMonitor.enabled'];
+    if (undefined !== enableTickerMonitor && '' !== enableTickerMonitor)
+    {
+        if ('true' == enableTickerMonitor || '1' == enableTickerMonitor)
+        {
+            config.tickerMonitor.enabled = true;
+        }
+        else if ('false' == enableTickerMonitor || '0' == enableTickerMonitor)
+        {
+            config.tickerMonitor.enabled = false;
+        }
+    }
+    if (config.tickerMonitor.enabled)
+    {
+        if (undefined !== process.env['cfg.tickerMonitor.maxConditions'] && '' != process.env['cfg.tickerMonitor.maxConditions'])
+        {
+            let value = parseInt(process.env['cfg.tickerMonitor.maxConditions']);
+            if (!isNaN(value) && value >= 0)
+            {
+                config.tickerMonitor.maxConditions = process.env['cfg.tickerMonitor.maxConditions'];
+            }
+        }
+        if (undefined !== process.env['cfg.tickerMonitor.maxDuration'] && '' != process.env['cfg.tickerMonitor.maxDuration'])
+        {
+            let value = parseInt(process.env['cfg.tickerMonitor.maxDuration']);
+            if (!isNaN(value) && value >= 0)
+            {
+                config.tickerMonitor.maxDuration = process.env['cfg.tickerMonitor.maxDuration'];
+            }
+        }
+    }
+}
+// add log if TickerMonitor is enabled
+if (config.tickerMonitor.enabled)
+{
+    logger.warn("TickerMonitor is enabled");
+}
+
+//-- check api key
+// check env (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    let apiKey = process.env['cfg.auth.apikey'];
+    if (undefined !== apiKey && '' != apiKey)
+    {
+        config.auth.apiKey.enabled = true;
+        config.auth.apiKey.key = apiKey;
+    }
 }
 if (config.auth.apiKey.enabled && '' != config.auth.apiKey.key)
 {
     logger.warn("API Key is enabled");
 }
 
-// check config
-let logLevel = process.env['cfg.logLevel'];
-if (undefined !== logLevel)
+// check env for log level (only if custom config does not exist)
+if (!hasCustomConfig)
 {
-    switch (logLevel)
+    let logLevel = process.env['cfg.logLevel'];
+    if (undefined !== logLevel)
     {
-        case 'error':
-        case 'warn':
-        case 'info':
-        case 'verbose':
-        case 'debug':
-        case 'silly':
-            config.logLevel = logLevel;
+        switch (logLevel)
+        {
+            case 'error':
+            case 'warn':
+            case 'info':
+            case 'verbose':
+            case 'debug':
+            case 'silly':
+                config.logLevel = logLevel;
+        }
     }
 }
 
 // update log level
 logger.level = config.logLevel;
 
-// create app
-const bParser = bodyParser.urlencoded({ extended: false })
-const app = express();
+// check env for external endpoints (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    if (undefined !== process.env['cfg.listen.externalEndpoint'] && '' != process.env['cfg.listen.externalEndpoint'])
+    {
+        config.listen.externalEndpoint = process.env['cfg.listen.externalEndpoint'];
+    }
+    if (undefined !== process.env['cfg.listenWs.externalEndpoint'] && '' != process.env['cfg.listenWs.externalEndpoint'])
+    {
+        config.listenWs.externalEndpoint = process.env['cfg.listenWs.externalEndpoint'];
+    }
+}
 
-app.use(function(req, res, next) {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "apikey");
-    res.header("Access-Control-Allow-Methods", "GET,POST,DELETE,PUT,OPTIONS");
-    next();
+// check env for sessions configuration (only if custom config does not exist)
+if (!hasCustomConfig)
+{
+    if (undefined !== process.env['cfg.sessions.maxSubscriptions'] && '' != process.env['cfg.sessions.maxSubscriptions'])
+    {
+        let value = parseInt(process.env['cfg.sessions.maxSubscriptions']);
+        if (!isNaN(value) && value >= 0)
+        {
+            config.sessions.maxSubscriptions = process.env['cfg.sessions.maxSubscriptions'];
+        }
+    }
+    if (undefined !== process.env['cfg.sessions.maxDuration'] && '' != process.env['cfg.sessions.maxDuration'])
+    {
+        let value = parseInt(process.env['cfg.sessions.maxDuration']);
+        if (!isNaN(value) && value >= 0)
+        {
+            config.sessions.maxDuration = process.env['cfg.sessions.maxDuration'];
+        }
+    }
+    let hideIpaddr = process.env['cfg.sessions.hideIpaddr'];
+    if (undefined !== hideIpaddr && '' !== hideIpaddr)
+    {
+        if ('true' == hideIpaddr || '1' == hideIpaddr)
+        {
+            config.sessions.hideIpaddr = true;
+        }
+        else if ('false' == hideIpaddr || '0' == hideIpaddr)
+        {
+            config.sessions.hideIpaddr = false;
+        }
+    }
+}
+
+//-- check certificate files
+let sslCertificate = {
+    key:{
+        required:true,
+        path:'ssl/certificate.key'
+    },
+    cert:{
+        required:true,
+        path:'ssl/certificate.crt'
+    },
+    ca:{
+        required:false,
+        path:'ssl/ca.crt'
+    }
+}
+let sslOptions = {}
+if (config.listen.ssl || config.listenWs.ssl)
+{
+    _.forEach(sslCertificate, (obj, key) => {
+        obj.file = path.join(__dirname, obj.path);
+        if (!fs.existsSync(obj.file))
+        {
+            if (!obj.required)
+            {
+                return;
+            }
+            logger.error("SSL requested in config but file '%s' does not exist", obj.path);
+            process.exit(1);
+        }
+        try
+        {
+            sslOptions[key] = fs.readFileSync(obj.file);
+        }
+        catch (e)
+        {
+            logger.error("SSL requested in config but file '%s' cannot be read (%s)", obj.path, e.message);
+            process.exit(1);
+        }
+    });
+}
+
+// update default user-agent
+internalConfig.set('userAgent', config.userAgent.value);
+
+//-- HTTP server
+let startHttp = function(){
+    const bodyParsers = {
+        urlEncoded:bodyParser.urlencoded({ extended: false }),
+        json:bodyParser.json()
+    };
+    const app = express();
+    let server;
+    if (config.listen.ssl)
+    {
+        server = https.createServer(sslOptions, app);
+    }
+    else
+    {
+        server = http.createServer(app);
+    }
+    server.on('error', function(err){
+        if (undefined !== err.code && 'EADDRINUSE' == err.code)
+        {
+            logger.error("Address %s:%s is already in use", err.address, err.port);
+            process.exit(1);
+        }
+        throw err;
+    });
+    app.use(compression());
+    app.use(function(req, res, next) {
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header("Access-Control-Allow-Headers", "apikey, Content-Type");
+        res.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,PUT,OPTIONS");
+        next();
+    });
+
+    // do we want to trust proxy
+    if (config.auth.trustProxy.enabled)
+    {
+        app.set('trust proxy', config.auth.trustProxy.proxies);
+    }
+
+    // load routes
+    require('./app/routes/http')(app, bodyParsers, config);
+
+    // start server
+    let ipaddr = '0.0.0.0';
+    if ('*' != config.listen.ipaddr)
+    {
+        ipaddr = config.listen.ipaddr;
+    }
+    return function(){
+        server.listen(config.listen.port, ipaddr, function(){
+            let proto = 'HTTP';
+            if (config.listen.ssl)
+            {
+                proto = 'HTTPS';
+            }
+            logger.warn("%s server is alive on %s:%s", proto, config.listen.ipaddr, config.listen.port);
+        });
+    }
+}();
+
+//-- WS server
+let startWs = function()
+{
+    const app = express();
+    let server;
+    if (config.listenWs.ssl)
+    {
+        server = https.createServer(sslOptions, app);
+    }
+    else
+    {
+        server = http.createServer(app);
+    }
+    server.on('error', function(err){
+        if (undefined !== err.code && 'EADDRINUSE' == err.code)
+        {
+            logger.error("Address %s:%s is already in use", err.address, err.port);
+            process.exit(1);
+        }
+        throw err;
+    });
+    const expressWs = require('express-ws')(app, server, {
+        wsOptions:{}
+    });
+
+    // do we want to trust proxy
+    if (config.auth.trustProxy.enabled)
+    {
+        app.set('trust proxy', config.auth.trustProxy.proxies);
+    }
+
+    // load routes
+    require('./app/routes/ws')(app, config);
+
+    // start server
+    let ipaddr = '0.0.0.0';
+    if ('*' != config.listenWs.ipaddr)
+    {
+        ipaddr = config.listenWs.ipaddr;
+    }
+    return function(){
+        server.listen(config.listenWs.port, ipaddr, function(){
+            let proto = 'WS';
+            if (config.listenWs.ssl)
+            {
+                proto = 'WSS';
+            }
+            logger.warn("%s server is alive on %s:%s", proto, config.listenWs.ipaddr, config.listenWs.port);
+        });
+    }
+}();
+
+// trap ctrl-c to close database properly
+process.on('SIGINT', function() {
+    storage.close();
+    process.exit();
 });
 
-// do we want to trust proxy
-if (config.auth.trustProxy.enabled)
-{
-    app.set('trust proxy', config.auth.trustProxy.proxies);
-}
-
-// load routes
-require('./app/routes')(app, bParser, config);
-
-// start app
-const http = require('http').Server(app);
-var ipaddr = '0.0.0.0';
-if ('*' != config.listen.ipaddr)
-{
-    ipaddr = config.listen.ipaddr;
-}
-http.listen(config.listen.port, ipaddr, function(){
-    logger.warn("We're alive on %s:%s", config.listen.ipaddr, config.listen.port);
-}).on('error', function(err){
-    if (undefined !== err.code && 'EADDRINUSE' == err.code)
-    {
-        logger.error("Address %s:%s is already in use", err.address, err.port);
+//-- check storage
+storage.checkDatabase().then(() => {
+    // load data from storage
+    storage.loadData(config).then(() => {
+        logger.info("Data loaded successfully");
+        sessionRegistry.startCheckSessionsLoop({maxDuration:config.sessions.maxDuration});
+        //-- start both servers
+        startHttp();
+        startWs();
+    }).catch(() => {
         process.exit(1);
-    }
-    throw err;
+    });
+}).catch (() => {
+    process.exit(1);
 });

@@ -1,0 +1,184 @@
+= Portfolio
+
+[NOTE]
+====
+Those routes will only be available if :
+
+* at least one exchange has _balances_ feature enabled
+* _marketCap_ service is enabled
+
+====
+
+== Retrieve portfolio across all exchanges
+
+*GET* _/portfolio_
+
+=== Optional query parameters
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+
+|Name
+|Type
+|Default
+|Description
+
+|exchanges
+|string (comma-separated)
+|
+|Comma-separated list of exchanges to include in portfolio
+
+|convertTo
+|string (comma-separated)
+|
+|Convert portfolio value to fiat currencies (ex: _GBP_ or _EUR_) or any other symbol (ex: _ETH_ or _NEO_)
+
+|===
+
+[NOTE]
+====
+Using a fiat currency for conversion required service _fxConverter_
+====
+
+=== Result
+
+[cols="1,1a,3a", options="header"]
+|===
+|Name
+|Type
+|Description
+
+|price
+|float
+|Estimated value of portfolio in _USD_
+
+|convertedPrice
+|object
+|Estimated value of portfolio in multiple currencies
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}convertCurrency_
+|object
+|Estimated value of portfolio in currency _convertCurrency_
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}price_
+|float
+|Estimated value of portfolio in currency _convertCurrency_. Will be _0_ if _convertCurrency_ is not supported
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}unknownPrice
+|boolean
+|Whether or not price is unknown. Price will be unknown if _convertCurrency_ is not supported
+
+|balances
+|object
+|one entry per currency, currency symbol being the key
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}currency_
+|object
+|Information for currency _currency_
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}volume
+|float
+|Volume of current currency
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}price
+|float
+|Estimated value in _USD_ of the balance for current currency. Will be _0_ if currency is not supported by _marketCap_ service
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}convertedPrice
+|object
+|Estimated value of the balance for current currency in multiple currencies. Will be an empty object if currency is not supported by _marketCap_ service
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}convertCurrency_
+|object
+|Estimated value in _convertCurrency_ of the balance for current currency
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}convertCurrency_
+|float
+|Estimated value in _convertCurrency_ of the balance for current currency. Will be _0_ if _convertCurrency_ is not supported
+
+|_{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}unknownPrice_
+|boolean
+|Whether or not price is unknown. Price will be unknown if _convertCurrency_ is not supported
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}pricePercent
+|float [0,100]
+|% of portfolio (based on price) represented by current currency
+
+|{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}{nbsp}unknownPrice
+|boolean
+|Whether or not price is unknown. Price will be unknown if currency is not supported by _marketCap_ service
+
+|===
+
+.Examples
+
+Example for *GET* _/portfolio_
+
+[source,json]
+----
+{
+    "balances":{
+        "BTC":{
+            "volume":0.27664163,
+            "price":2088.8297,
+            "pricePercent":0.56,
+            "convertedPrice":{
+                "BTC":0.27664163,
+                "GBP":1570.43053642,
+                "ETH":3.65988132
+            },
+            "unknownPrice":false
+        },
+        "ETC":{
+            "volume":1114.68723594,
+            "price":17229.1633,
+            "pricePercent":4.63,
+            "convertedPrice":{
+                "BTC":2.2818059,
+                "GBP":12953.28416138,
+                "ETH":30.1875707
+            },
+            "unknownPrice":false
+        },
+        "DASH":{
+            "volume":1068.06521149,
+            "price":331179.2524,
+            "pricePercent":89.09,
+            "convertedPrice":{
+                "BTC":43.86090932,
+                "GBP":248988.23577402,
+                "ETH":580.26596709
+            },
+            "unknownPrice":false
+        },
+        "ADA":{
+            "volume":1251.19959559,
+            "price":267.7379,
+            "pricePercent":0.07,
+            "convertedPrice":{
+                "BTC":0.03545887,
+                "GBP":201.29159122,
+                "ETH":0.46910914
+            },
+            "unknownPrice":false
+        },
+        "BNB":{
+            "volume":1486.5804252,
+            "price":20990.5156,
+            "pricePercent":5.65,
+            "convertedPrice":{
+                "BTC":2.77995401,
+                "GBP":15781.15600692,
+                "ETH":36.77791335
+            },
+            "unknownPrice":false
+        }
+    },
+    "price":371755.4989,
+    "priceConverted":{
+        "BTC":49.23476973,
+        "GBP":279494.39806996,
+        "ETH":651.3604416
+    }
+}
+----

@@ -1,0 +1,1791 @@
+"use strict";
+const ccxt = require('ccxt');
+const logger = require('winston');
+const _ = require('lodash');
+const Big = require('big.js');
+const CcxtErrors = require('./ccxt-errors');
+
+const precisionToStep = [1, 0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001, 0.0000001, 0.00000001, 0.000000001, 0.0000000001];
+
+/*
+
+Default client for CCXT exchanges. Handles custom formatting
+
+Each method will return an object such as below
+
+{
+    // output returned by ccxt
+    ccxt:{},
+    // formatted output (gateway format)
+    custom:{}
+}
+
+When an error is triggered by ccxt, a CcxtErrors.BaseError will be thrown
+
+*/
+
+const klinesIntervalsMapping = {
+    '1m':60, '3m':180, '5m':300, '15m':900, '30m':1800,
+    '1h':3600, '2h':7200, '4h':14400, '6h':21600, '8h':28800, '12h':43200,
+    '1d':86400, '3d':259200,
+    '1w':604800,
+    '1M':2592000
+}
+
+class DefaultCcxtClient
+{
+
+/**
+ * @param {string} ccxtExchangeId ccxt exchange id
+ * @param {object} ccxtExchangeOpt ccxt options
+ */
+constructor(ccxtExchangeId, ccxtExchangeOpt)
+{
+    this.ccxt = new ccxt[ccxtExchangeId](ccxtExchangeOpt);
+    // disable pair substitution
+    this.ccxt.substituteCommonCurrencyCodes = false;
+    this._redefineCcxtErrorHandlers();
+}
+
+_redefineCcxtErrorHandlers()
+{
+    // redefine market
+    this.ccxt._market = this.ccxt.market;
+    this.ccxt.market = (symbol) => {
+        try
+        {
+            return this.ccxt._market(symbol);
+        }
+        catch (e)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+    };
+
+    // redefine executeRestRequest
+    this.ccxt._executeRestRequest = this.ccxt.executeRestRequest;
+    this.ccxt.executeRestRequest = (url, method = 'GET', headers = undefined, body = undefined) => {
+        return new Promise((resolve, reject) => {
+            this.ccxt._executeRestRequest(url, method, headers, body).then((data) => {
+                return resolve(data);
+            }).catch ((e) => {
+                if (e instanceof CcxtErrors.BaseError)
+                {
+                    return reject(e);
+                }
+                return reject(new CcxtErrors.BaseError(e, {method:method,url:url}, undefined, undefined));
+            });
+        });
+    };
+    // redefine default error handler
+    this.ccxt._defaultErrorHandler = this.ccxt.defaultErrorHandler;
+    this.ccxt.defaultErrorHandler = (code, reason, url, method, body) => {
+        try
+        {
+            return this.ccxt._defaultErrorHandler(code, reason, url, method, body);
+        }
+        catch (e)
+        {
+            throw new CcxtErrors.BaseError(e, {method:method,url:url}, {statusCode:code,statusMessage:reason,body:body}, this.ccxt.last_json_response);
+        }
+    };
+    // redefine custom error handler
+    this.ccxt._handleErrors = this.ccxt.handleErrors;
+    this.ccxt.handleErrors = (statusCode, statusText, url, method, responseHeaders, responseBody, response, requestHeaders, requestBody) => {
+        try
+        {
+            return this.ccxt._handleErrors(statusCode, statusText, url, method, responseHeaders, responseBody, response, requestHeaders, requestBody);
+        }
+        catch (e)
+        {
+            throw new CcxtErrors.BaseError(e, {method:method,url:url}, {statusCode:statusCode,statusMessage:statusText,body:responseBody}, response);
+        }
+    };
+}
+
+/**
+ * Returns a new object with default limits
+ *
+ * @return {object}
+ */
+_getDefaultLimits()
+{
+    return {
+        rate:{
+           min:0.00000001,
+           max:null,
+           step:0.00000001,
+           precision:8
+        },
+        quantity:{
+            min:0.00000001,
+            max:null,
+            step:0.00000001,
+            precision:8
+        },
+        price:{
+            min:0.00000001,
+            max:null
+        }
+    }
+}
+
+_precisionToStep(value)
+{
+    let step = 0.00000001;
+    if ('string' == typeof(value))
+    {
+        step = value.toFixed(10);
+    }
+    else
+    {
+        if (value >= 0 && value <= 10)
+        {
+            step = precisionToStep[value];
+        }
+        else
+        {
+            logger.warn(`Could not convert 'precision' to 'step' : value = '${value}'`)
+            // default will be used
+        }
+    }
+    return step;
+}
+
+// borrowed from ccxt
+_stepToPrecision(value)
+{
+    let split;
+    if ('string' == typeof(value))
+    {
+        split = value.replace(/0+$/g, '').split('.');
+    }
+    else
+    {
+        split = value.toFixed(10).replace(/0+$/g, '').split('.');
+    }
+    return (split.length > 1) ? (split[1].length) : 0;
+}
+
+/**
+ * Returns the duration (in sec) of a given klines interval
+ * @param {string} interval klines interval
+ * @return {integer} duration in sec
+ */
+_getKlinesIntervalDuration(interval)
+{
+    return klinesIntervalsMapping[interval];
+}
+
+/**
+ * Convert pair from ccxt format Y/X to custom format X-Y
+ *
+ * @param {string} pair pair in ccxt format (Y/X)
+ * @return {string|undefined} pair in custom format (X-Y) or 'undefined' if pair could not be converted
+ */
+_toCustomPair(pair)
+{
+    let arr = pair.split('/');
+    // return 'undefined' if pair could not be splitted using '/' (can occur for 'okex' since we have pairs such as 'BTC-USD-200529-14000-P')
+    if (1 == arr.length) {
+        return undefined;
+    }
+    return arr[1] + '-' + arr[0];
+}
+
+/**
+ * Convert pair from custom format X-Y to exchange format X-Y
+ * @param {string} pair pair in custom format (X-Y)
+ * @return {string} pair in exchange format (Y/X)
+ */
+_toCcxtPair(pair)
+{
+    let arr = pair.split('-');
+    return arr[1] + '/' + arr[0];
+}
+
+/**
+ * Returns all active pairs
+ *
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output example for loadMarkets
+
+[
+    {
+        "id":"BTC-USDT",
+        "symbol":"BTC/USDT",
+        "base":"BTC",
+        "quote":"USDT",
+        "active":true,
+        "taker":0.001,
+        "maker":0.001,
+        "info":{
+            "coinType":"BTC",
+            "trading":true,
+            "symbol":"BTC-USDT",
+            "lastDealPrice":8460,
+            "buy":8460,
+            "sell":8493.004404,
+            "change":-50,
+            "coinTypePair":"USDT",
+            "sort":100,
+            "feeRate":0.001,
+            "volValue":1224262.33506258,
+            "high":8590.275105,
+            "datetime":1526902906000,
+            "vol":144.136347,
+            "low":8296.830001,
+            "changeRate":-0.0059
+        },
+        "lot":1e-8,
+        "precision":{
+            "amount":8,
+            "price":8
+        },
+        "limits":{
+            "amount":{
+                "min":1e-8
+            },
+            "price":{
+
+            }
+        }
+    },
+    {
+        "id":"ETH-BTC",
+        "symbol":"ETH/BTC",
+        "base":"ETH",
+        "quote":"BTC",
+        "active":true,
+        "taker":0.001,
+        "maker":0.001,
+        "info":{
+            "coinType":"ETH",
+            "trading":true,
+            "symbol":"ETH-BTC",
+            "lastDealPrice":0.08384883,
+            "buy":0.08384883,
+            "sell":0.08399669,
+            "change":-0.00011118,
+            "coinTypePair":"BTC",
+            "sort":100,
+            "feeRate":0.001,
+            "volValue":236.60571194,
+            "high":0.0857787,
+            "datetime":1526902906000,
+            "vol":2802.3795454,
+            "low":0.08341012,
+            "changeRate":-0.0013
+        },
+        "lot":1e-8,
+        "precision":{
+            "amount":8,
+            "price":8
+        },
+        "limits":{
+            "amount":{
+                "min":1e-8
+            },
+            "price":{
+
+            }
+        }
+    }
+]
+
+*/
+async getPairs()
+{
+    let data;
+    try
+    {
+        data = await this.ccxt.loadMarkets(true);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data, custom:this.formatPairs(data)};
+}
+
+/**
+ * Formats a list of pairs result returned by ccxt
+ *
+ * @param {object[]} ccxtData list of pairs returned by ccxt loadMarkets
+ * @return {object}
+ */
+formatPairs(ccxtData)
+{
+    let result = {};
+    _.forEach(ccxtData, (e) => {
+        // ignore non-active pairs
+        if (!e.active)
+        {
+            return;
+        }
+        let pair = this._toCustomPair(e.symbol);
+        if (undefined === pair) {
+            return;
+        }
+        result[pair] = this.formatPair(pair, e);
+    });
+    return result;
+}
+
+/**
+ * Formats a single of pair returned by ccxt
+ *
+ * @param {string} pair pair in custom format
+ * @param {object} ccxtData single pair entry returned by ccxt loadMarkets
+ * @return {object}
+ */
+formatPair(pair, ccxtData)
+{
+    let limits = this._getDefaultLimits();
+    //-- update precision & step
+    if (undefined !== ccxtData.precision)
+    {
+        // rate
+        if (undefined !== ccxtData.precision.price)
+        {
+            limits.rate.precision = ccxtData.precision.price;
+            /*
+                Check if precisionMode is TICK_SIZE (OKex for example)
+                See https://github.com/ccxt/ccxt/wiki/Manual#market-structure
+             */
+            if (this.ccxt.TICK_SIZE == this.ccxt.precisionMode) {
+                limits.rate.precision = this._stepToPrecision(limits.rate.precision);
+            }
+            limits.rate.step = this._precisionToStep(limits.rate.precision);
+        }
+        // quantity
+        if (undefined !== ccxtData.precision.amount)
+        {
+            limits.quantity.precision = ccxtData.precision.amount;
+            /*
+                Check if precisionMode is TICK_SIZE (OKex for example)
+                See https://github.com/ccxt/ccxt/wiki/Manual#market-structure
+             */
+            if (this.ccxt.TICK_SIZE == this.ccxt.precisionMode) {
+                limits.quantity.precision = this._stepToPrecision(limits.quantity.precision);
+            }
+            limits.quantity.step = this._precisionToStep(limits.quantity.precision);
+        }
+    }
+    //-- update min/max
+    if (undefined !== ccxtData.limits)
+    {
+        // rate
+        if (undefined !== ccxtData.limits.price)
+        {
+            if (undefined !== ccxtData.limits.price.min)
+            {
+                limits.rate.min = parseFloat(ccxtData.limits.price.min.toFixed(8));
+            }
+            if (undefined !== ccxtData.limits.price.max)
+            {
+                limits.rate.max = parseFloat(ccxtData.limits.price.max.toFixed(8));
+            }
+        }
+        // quantity
+        if (undefined !== ccxtData.limits.amount)
+        {
+            if (undefined !== ccxtData.limits.amount.min)
+            {
+                limits.quantity.min = parseFloat(ccxtData.limits.amount.min.toFixed(8));
+            }
+            if (undefined !== ccxtData.limits.amount.max)
+            {
+                limits.quantity.max = parseFloat(ccxtData.limits.amount.max.toFixed(8));
+            }
+        }
+        // price
+        if (undefined !== ccxtData.limits.cost)
+        {
+            if (undefined !== ccxtData.limits.cost.min)
+            {
+                // convert to fixed to avoid pb such as 0.001 * 0.0001 => 1.0000000000000001e-7
+                limits.price.min = parseFloat(ccxtData.limits.cost.min.toFixed(8));
+                if (limits.price.min < 0.00000001)
+                {
+                    limits.price.min = 0.00000001;
+                }
+            }
+            if (undefined !== ccxtData.limits.cost.max)
+            {
+                limits.price.max = parseFloat(ccxtData.limits.cost.max.toFixed(8));
+            }
+        }
+    }
+    return {
+        pair:pair,
+        baseCurrency:ccxtData.quote,
+        currency:ccxtData.base,
+        limits:limits
+    }
+}
+
+/**
+ * Retrieve tickers for all pairs
+ *
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output example for fetchTickers
+
+{
+    "BTC/USDT":{
+        "symbol":"BTC/USDT",
+        "timestamp":1526907160000,
+        "datetime":"2018-05-21T12:52:40.000Z",
+        "high":8590.275105,
+        "low":8300,
+        "bid":8489.698,
+        "ask":8508,
+        "open":8510,
+        "close":8489.698,
+        "last":8489.698,
+        "change":-20.302,
+        "percentage":-0.0024,
+        "baseVolume":146.98216467,
+        "quoteVolume":1248775.44123063,
+        "info":{
+            "coinType":"BTC",
+            "trading":true,
+            "symbol":"BTC-USDT",
+            "lastDealPrice":8489.698,
+            "buy":8489.698,
+            "sell":8508,
+            "change":-20.302,
+            "coinTypePair":"USDT",
+            "sort":100,
+            "feeRate":0.001,
+            "volValue":1248775.44123063,
+            "high":8590.275105,
+            "datetime":1526907160000,
+            "vol":146.98216467,
+            "low":8300,
+            "changeRate":-0.0024
+        }
+    },
+    "ETH/BTC":{
+        "symbol":"ETH/BTC",
+        "timestamp":1526907160000,
+        "datetime":"2018-05-21T12:52:40.000Z",
+        "high":0.08574385,
+        "low":0.08337457,
+        "bid":0.083443,
+        "ask":0.083731,
+        "open":0.08396001,
+        "close":0.083729,
+        "last":0.083729,
+        "change":-0.00023101,
+        "percentage":-0.0028,
+        "baseVolume":3018.9296003,
+        "quoteVolume":254.63643405,
+        "info":{
+            "coinType":"ETH",
+            "trading":true,
+            "symbol":"ETH-BTC",
+            "lastDealPrice":0.083729,
+            "buy":0.083443,
+            "sell":0.083731,
+            "change":-0.00023101,
+            "coinTypePair":"BTC",
+            "sort":100,
+            "feeRate":0.001,
+            "volValue":254.63643405,
+            "high":0.08574385,
+            "datetime":1526907160000,
+            "vol":3018.9296003,
+            "low":0.08337457,
+            "changeRate":-0.0028
+        }
+    }
+}
+
+*/
+async getTickers(ccxtParams)
+{
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchTickers(undefined, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatTickers(data)};
+}
+
+/**
+ * Retrieve ticker for a single pair
+ *
+ * @param {string} pair pair to retrieve ticker for
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output example for fetchTicker
+
+{
+    "symbol":"NEO/BTC",
+    "timestamp":1528736548000,
+    "datetime":"2018-06-11T17:02:28.000Z",
+    "high":0.00686581,
+    "low":0.00644451,
+    "bid":0.00650061,
+    "ask":0.00651218,
+    "close":0.0065033,
+    "last":0.0065033,
+    "baseVolume":123005.01657,
+    "info":{
+        "high":"0.00686581",
+        "vol":"123005.01657000",
+        "last":"0.00650330",
+        "low":"0.00644451",
+        "buy":"0.00650061",
+        "sell":"0.00651218",
+        "timestamp":1528736548000
+    }
+}
+
+*/
+async getTicker(pair, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchTicker(ccxtPair, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatTicker(pair, data)};
+}
+
+/**
+ * Formats tickers list returned by ccxt
+ *
+ * @param {object[]} ccxtData list of tickers returned by ccxt fetchTickers
+ * @return {object}
+ */
+formatTickers(ccxtData)
+{
+    let result = {};
+    _.forEach(ccxtData, (e) => {
+        let pair = this._toCustomPair(e.symbol);
+        result[pair] = this.formatTicker(pair, e);
+    });
+    return result;
+}
+
+/**
+ * Formats a single ticker entry returned by ccxt
+ *
+ * @param {string} pair pair in custom format
+ * @param {object} ccxtData ticker entry returned by ccxt fetchTickers
+ * @return {object}
+ */
+formatTicker(pair, ccxtData)
+{
+    let priceChangePercent = null;
+    if (undefined !== ccxtData.percentage)
+    {
+        priceChangePercent = parseFloat(ccxtData.percentage.toFixed(4));
+    }
+    // compute priceChangePercent
+    else if (undefined !== ccxtData.last && undefined !== ccxtData.open)
+    {
+        priceChangePercent = parseFloat(new Big(ccxtData.last).minus(ccxtData.open).div(ccxtData.open).times(100.0).toFixed(4))
+    }
+    let timestamp = null;
+    if (undefined !== ccxtData.timestamp)
+    {
+        timestamp = ccxtData.timestamp / 1000.0;
+    }
+    return {
+        pair:pair,
+        last:undefined === ccxtData.last ? null : ccxtData.last,
+        sell:undefined === ccxtData.ask ? null : ccxtData.ask ,
+        buy:undefined === ccxtData.bid ? null : ccxtData.bid,
+        high:undefined === ccxtData.high ? null : ccxtData.high,
+        low:undefined === ccxtData.low ? null : ccxtData.low,
+        volume:ccxtData.baseVolume,
+        priceChangePercent:priceChangePercent,
+        timestamp:timestamp
+    }
+}
+
+/**
+ * Retrieve order book for a single pair
+
+ * @param {string} pair pair to retrieve order book for
+ * @param {integer} limit maximum number of entries (for both ask & bids) (optional)
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object,custom:object}
+ */
+ /*
+ ccxt output example
+
+ {
+    "bids":[
+        [
+            8465,
+            0.00007027
+        ],
+        [
+            8448.000233,
+            0.14250619
+        ],...
+    ],
+    "asks":[
+        [
+            8487.99711,
+            0.0713537
+        ],
+        [
+            8499.99,
+            0.52504393
+        ],...
+    ],
+    "timestamp":1526911480103,
+    "datetime":"2018-05-21T14:04:40.103Z"
+}
+ */
+async getOrderBook(pair, limit, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchOrderBook(ccxtPair, limit, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatOrderBook(data)};
+}
+
+/**
+ * Formats order book returned by ccxt
+ *
+ * @param {object} ccxtData order book returned by ccxt fetchOrderBook
+ * @return {object}
+ */
+formatOrderBook(ccxtData)
+{
+    let result = {
+        buy:_.map(ccxtData.bids, (entry) => {
+            return {
+                rate:entry[0],
+                quantity:entry[1]
+            }
+        }),
+        sell:_.map(ccxtData.asks, (entry) => {
+            return {
+                rate:entry[0],
+                quantity:entry[1]
+            }
+        })
+    }
+    return result;
+}
+
+/**
+ * Returns last trades
+ *
+ * @param {string} pair pair to retrieve trades for
+ * @param {integer} limit maximum number of entries (for both ask & bids) (optional)
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object[]}
+ */
+ /*
+ ccxt output example
+
+ [
+     {
+         "info":[
+             1526913526000,
+             "SELL",
+             8386.346645,
+             0.00328233,
+             27.52675718
+         ],
+         "timestamp":1526913526000,
+         "datetime":"2018-05-21T14:38:46.000Z",
+         "symbol":"BTC/USDT",
+         "type":"limit",
+         "side":"sell",
+         "price":8386.346645,
+         "amount":0.00328233
+     },
+     {
+         "info":[
+             1526913528000,
+             "BUY",
+             8386.346645,
+             0.00984699,
+             82.58027155
+         ],
+         "timestamp":1526913528000,
+         "datetime":"2018-05-21T14:38:48.000Z",
+         "symbol":"BTC/USDT",
+         "type":"limit",
+         "side":"buy",
+         "price":8386.346645,
+         "amount":0.00984699
+     },...
+ ]
+
+*/
+async getTrades(pair, limit, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchTrades(ccxtPair, undefined, limit, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatTrades(data)};
+}
+
+/**
+ * Format trades returned by ccxt
+ *
+ * @param {object[]} ccxtData list of trades returned by ccxt fetchTrades
+ * @return {object}
+ */
+formatTrades(ccxtData)
+{
+    let result = [];
+    if (ccxtData.length > 0)
+    {
+        if (1 == ccxtData.length)
+        {
+            result.push(this.formatTrade(e));
+        }
+        else
+        {
+            //-- check first 2 values to see in which order trades are sorted
+            // first trade is newer than second (keep order)
+            if (ccxtData[0].timestamp > ccxtData[1].timestamp)
+            {
+                _.forEach(ccxtData, (e) => {
+                    result.push(this.formatTrade(e));
+                });
+            }
+            // first trade is older than second (reverse order)
+            else
+            {
+                _.forEach(ccxtData, (e) => {
+                    result.unshift(this.formatTrade(e));
+                });
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * Format trades returned by ccxt
+ *
+ * @param {object} ccxtData single trade returned by ccxt fetchTrades
+ * @return {object}
+ */
+formatTrade(ccxtData)
+{
+    let trade = {
+        id:ccxtData.id,
+        timestamp:ccxtData.timestamp / 1000.0,
+        orderType:ccxtData.side,
+        quantity:ccxtData.amount,
+        rate:ccxtData.price
+    };
+    trade.price = parseFloat(new Big(trade.quantity).times(trade.rate).toFixed(8));
+    // some exchanges do not assign any trade id
+    if (undefined === trade.id)
+    {
+        trade.id = null;
+    }
+    return trade;
+}
+
+/**
+ * Returns charts data
+ *
+ * @param {string} pair pair to retrieve chart data for
+ * @param {string} interval charts interval
+ * @param {integer} fromTimestamp unix timestamp in seconds
+ * @param {integer} toTimestamp unix timestamp in seconds
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object[]}
+ */
+/*
+ccxt output example
+
+[
+    [
+        1526822400000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526822700000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526823000000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526823300000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526823600000,
+        59.99002,
+        59.99003,
+        59.99002,
+        59.99003,
+        4.12389
+    ],
+    [
+        1526823900000,
+        60.629473,
+        60.629473,
+        59.910011,
+        59.910011,
+        0.510837
+    ],
+    [
+        1526824200000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526824500000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526824800000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ],
+    [
+        1526825100000,
+        null,
+        null,
+        null,
+        null,
+        0
+    ]
+]
+
+*/
+async getKlines(pair, interval, fromTimestamp, toTimestamp, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let intervalDuration = this._getKlinesIntervalDuration(interval);
+    // ccxt is expecting a number of klines points
+    let count = Math.ceil((toTimestamp - fromTimestamp) / intervalDuration);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchOHLCV(ccxtPair, interval, fromTimestamp * 1000, count, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatKlines(data)};
+}
+
+/**
+ * Format klines returned by ccxt
+ *
+ * @param {object[]} ccxtData list of klines returned by ccxt fetchOHLCV
+ * @return {object[]}
+ */
+formatKlines(ccxtData)
+{
+    let result = [];
+    _.forEach(ccxtData, (e) => {
+        result.push({
+            timestamp:Math.floor(e[0] / 1000.0),
+            open:null === e[1] ? null : parseFloat(e[1]),
+            high:null === e[2] ? null : parseFloat(e[2]),
+            low:null === e[3] ? null : parseFloat(e[3]),
+            close:null === e[4] ? null : parseFloat(e[4]),
+            volume:parseFloat(e[5])
+        });
+    });
+    return result;
+}
+
+/**
+ * Retrieve open orders for a single pair
+ * @param {string} pair pair to retrieve open orders for
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output for fetchOpenOrders
+
+[
+    {
+        "id":"5b043105f773770d72d28ea4",
+        "timestamp":1527001350000,
+        "datetime":"2018-05-22T15:02:30.000Z",
+        "symbol":"GAS/BTC",
+        "type":"limit",
+        "side":"sell",
+        "price":0.1,
+        "amount":0.1,
+        "cost":0.010000000000000002,
+        "filled":0,
+        "remaining":0.1,
+        "status":"open",
+        "fee":{
+            "currency":"BTC"
+        }
+    },...
+]
+
+*/
+async getOpenOrdersForPair(pair, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchOpenOrders(ccxtPair, undefined, undefined, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatOpenOrders(data)};
+}
+
+/**
+ * Retrieve open orders for all pairs
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output for fetchOpenOrders
+
+[
+    {
+        "id":"5b043105f773770d72d28ea4",
+        "timestamp":1527001350000,
+        "datetime":"2018-05-22T15:02:30.000Z",
+        "symbol":"GAS/BTC",
+        "type":"limit",
+        "side":"sell",
+        "price":0.1,
+        "amount":0.1,
+        "cost":0.010000000000000002,
+        "filled":0,
+        "remaining":0.1,
+        "status":"open",
+        "fee":{
+            "currency":"BTC"
+        }
+    },...
+]
+
+*/
+async getOpenOrders(ccxtParams)
+{
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchOpenOrders(undefined, undefined, undefined, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatOpenOrders(data)};
+}
+
+/**
+ * Formats a list of open order returned by ccxt
+ *
+ * @param {object[]} ccxtData list of open orders returned by ccxt fetchOpenOrders
+ * @return {object}
+ */
+formatOpenOrders(ccxtData)
+{
+    let result = {};
+    _.forEach(ccxtData, (e) => {
+        let order = this.formatOpenOrder(e);
+        result[order.orderNumber] = order;
+    });
+    return result;
+}
+
+/**
+ * Formats a single open order returned by ccxt
+ *
+ * @param {object} ccxtData single order entry returned by ccxt fetchOpenOrders
+ * @return {object}
+ */
+formatOpenOrder(ccxtData)
+{
+    let splittedPair = ccxtData.symbol.split('/');
+    let order = {
+        pair:`${splittedPair[1]}-${splittedPair[0]}`,
+        orderNumber:ccxtData.id,
+        openTimestamp:ccxtData.timestamp / 1000.0,
+        orderType:ccxtData.side,
+        quantity:ccxtData.amount,
+        remainingQuantity:ccxtData.remaining,
+        targetRate:ccxtData.price
+    };
+    order.targetPrice = parseFloat(new Big(order.targetRate).times(order.quantity).toFixed(8));
+    return order;
+}
+
+/**
+ * Retrieve closed orders for a single pair
+ * @param {string} pair pair to retrieve closed orders for
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @param {boolean} mergeTrades if true, indicates that exchange API does not return orders but multiple trades for the same order (default = false)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output for fetchClosedOrders
+
+[
+    {
+        "id":"5b0430f0f773770f4aa46b3a",
+        "timestamp":1527001329000,
+        "datetime":"2018-05-22T15:02:09.000Z",
+        "symbol":"GAS/BTC",
+        "type":"limit",
+        "side":"sell",
+        "price":0.00268962,
+        "amount":0.1,
+        "cost":0.00026896,
+        "filled":0.1,
+        "remaining":0,
+        "status":"closed",
+        "fee":{
+            "cost":2.7e-7,
+            "rate":0.001,
+            "currency":"BTC"
+        }
+    }
+]
+*/
+async getClosedOrdersForPair(pair, ccxtParams, mergeTrades)
+{
+    if (undefined === mergeTrades)
+    {
+        mergeTrades = false;
+    }
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchClosedOrders(ccxtPair, undefined, undefined, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatClosedOrders(data, mergeTrades)};
+}
+
+/**
+ * Retrieve closed orders for all pairs
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @param {boolean} mergeTrades if true, indicates that exchange API does not return orders but multiple trades for the same order (default = false)
+ * @return {ccxt:object[],custom:object}
+ */
+/*
+ccxt output for fetchClosedOrders
+
+[
+    {
+        "id":"5b0430f0f773770f4aa46b3a",
+        "timestamp":1527001329000,
+        "datetime":"2018-05-22T15:02:09.000Z",
+        "symbol":"GAS/BTC",
+        "type":"limit",
+        "side":"sell",
+        "price":0.00268962,
+        "amount":0.1,
+        "cost":0.00026896,
+        "filled":0.1,
+        "remaining":0,
+        "status":"closed",
+        "fee":{
+            "cost":2.7e-7,
+            "rate":0.001,
+            "currency":"BTC"
+        }
+    }
+]
+*/
+async getClosedOrders(ccxtParams, mergeTrades)
+{
+    if (undefined === mergeTrades)
+    {
+        mergeTrades = false;
+    }
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchClosedOrders(undefined, undefined, undefined, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatClosedOrders(data, mergeTrades)};
+}
+
+/**
+ * Formats a list of open order returned by ccxt
+ *
+ * NB: in case mergeTrades is true, following properties will be Big objects (quantity, actualPrice, fees.amount)
+ *
+ * @param {object[]} ccxtData list of open orders returned by ccxt fetchClosedOrders
+ * @param {boolean} mergeTrades if true, indicates that exchange API does not return orders but multiple trades for the same order (default = false)
+ * @return {object}
+ */
+formatClosedOrders(ccxtData, mergeTrades)
+{
+    if (undefined === mergeTrades)
+    {
+        mergeTrades = false;
+    }
+    let result = {};
+    _.forEach(ccxtData, (e) => {
+        let order = this.formatClosedOrder(e, !mergeTrades);
+        if (undefined === result[order.orderNumber])
+        {
+            if (mergeTrades)
+            {
+                order.quantity = new Big(order.quantity);
+                order.actualPrice = new Big(order.actualPrice);
+                if (null !== order.fees)
+                {
+                    order.fees.amount = new Big(order.fees.amount);
+                }
+            }
+            result[order.orderNumber] = order;
+        }
+        else
+        {
+            this._mergeOrder(order, result[order.orderNumber]);
+        }
+    });
+    return result;
+}
+
+/**
+ * Merges one order into another. This will be called automatically when exchange API does not return orders but multiple trades for the same order
+ *
+ * @param {object} order order to merge
+ * @param {object} into destination order
+ */
+_mergeOrder(order, into)
+{
+    // update closedTimestamp
+    if (order.closedTimestamp > into.closedTimestamp)
+    {
+        into.closedTimestamp = order.closedTimestamp;
+    }
+    // update quantity & actualPrice
+    into.quantity = into.quantity.plus(order.quantity);
+    into.actualPrice = into.actualPrice.plus(order.actualPrice);
+    // update fees
+    if (null !== order.fees)
+    {
+        // initialize fees if needed
+        if (null === into.fees)
+        {
+            into.fees = {amount:new Big(0), currency:order.fees.currency};
+        }
+        into.fees.amount = into.fees.amount.plus(order.fees.amount);
+    }
+}
+
+/**
+ * Formats a single open order returned by ccxt
+ *
+ * @param {object} ccxtData single order entry returned by ccxt fetchClosedOrders
+ * @param {boolean} computeFinalRate whether or not final rate should be computed (default = true, will be false if exchange API does not return orders but multiple trades for the same order)
+ * @return {object}
+ */
+formatClosedOrder(ccxtData, computeFinalRate)
+{
+    if (undefined === computeFinalRate)
+    {
+        computeFinalRate = true;
+    }
+    let splittedPair = ccxtData.symbol.split('/');
+    let order = {
+        pair:`${splittedPair[1]}-${splittedPair[0]}`,
+        orderNumber:ccxtData.id,
+        openTimestamp:null,
+        closedTimestamp:ccxtData.timestamp / 1000.0,
+        orderType:ccxtData.side,
+        quantity:ccxtData.filled,
+        actualRate:this.getActualRate(ccxtData),
+        actualPrice:0,
+        finalRate:null,
+        finalPrice:null,
+        fees:null
+    };
+    if (undefined !== ccxtData.lastTradeTimestamp)
+    {
+        order.closedTimestamp = ccxtData.lastTradeTimestamp / 1000.0;
+    }
+    // compute fees, rate & price
+    if (0 != order.quantity)
+    {
+        order.actualPrice = this.getActualPrice(ccxtData);
+        if (undefined !== ccxtData.fee)
+        {
+            order.fees = {
+                amount:ccxtData.fee.cost,
+                currency:ccxtData.fee.currency
+            }
+            // if we're not supposed to compute final rate, don't do it
+            if (computeFinalRate)
+            {
+                // only compute order.finalPrice & order.finalRate if fees.currency != from baseCurrency (otherwise use order.actualPrice & order.actualRate)
+                if (splittedPair[1] != order.fees.currency)
+                {
+                    order.finalPrice = order.actualPrice;
+                    order.finalRate = order.actualRate;
+                }
+                else
+                {
+                    let finalPrice;
+                    if ('buy' == order.orderType)
+                    {
+                        finalPrice =  new Big(order.actualPrice).plus(order.fees.amount);
+                    }
+                    else
+                    {
+                        finalPrice =  new Big(order.actualPrice).minus(order.fees.amount);
+                    }
+                    order.finalPrice = parseFloat(finalPrice.toFixed(8));
+                    order.finalRate = parseFloat(finalPrice.div(order.quantity).toFixed(8));
+                }
+            }
+        }
+    }
+    return order;
+}
+
+/**
+ * Extract actual rate from ccxt data
+ *
+ * @param {object} ccxtData single order entry returned by ccxt fetchClosedOrders
+ * @return {float}
+ */
+getActualRate(ccxtData)
+{
+    if (undefined !== ccxtData.price)
+    {
+        return ccxtData.price;
+    }
+    return null;
+}
+
+/**
+ * Extract actual price from ccxt data
+ *
+ * @param {object} ccxtData single order entry returned by ccxt fetchClosedOrders
+ * @return {float}
+ */
+getActualPrice(ccxtData)
+{
+    if (undefined !== ccxtData.cost)
+    {
+        return ccxtData.cost;
+    }
+    let rate = this.getActualRate(ccxtData);
+    return parseFloat(new Big(ccxtData.filled).times(rate).toFixed(8));
+}
+
+
+/**
+ * Retrieves a single order (open or closed)
+ *
+ * @param {string} orderNumber
+ * @param {string} pair pair (ex: USDT-NEO) (if exchange supports retrieving an order without the pair, value will be undefined)
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object,custom:object}
+ */
+/*
+
+ccxt output for fetchOrder
+
+Closed order
+-----------
+
+{
+    "info":{
+        "coinType":"GAS",
+        "dealValueTotal":0.00026896,
+        "feeTotal":2.7e-7,
+        "userOid":"5a54cb07130e183273bd96ec",
+        "dealAmount":0.1,
+        "coinTypePair":"BTC",
+        "type":"SELL",
+        "orderOid":"5b0430f0f773770f4aa46b3a",
+        "createdAt":1527001329000,
+        "dealOrders":{
+            "total":1,
+            "firstPage":true,
+            "lastPage":false,
+            "datas":[
+                {
+                    "createdAt":1527001329000,
+                    "amount":0.1,
+                    "dealValue":0.00026896,
+                    "fee":2.7e-7,
+                    "dealPrice":0.00268962,
+                    "feeRate":0.001
+                }
+            ],
+            "currPageNo":1,
+            "limit":20,
+            "pageNos":1
+        },
+        "dealPriceAverage":0.0026896,
+        "orderPrice":0.00268761,
+        "pendingAmount":0
+    },
+    "id":"5b0430f0f773770f4aa46b3a",
+    "timestamp":1527001329000,
+    "datetime":"2018-05-22T15:02:09.000Z",
+    "symbol":"GAS/BTC",
+    "type":"limit",
+    "side":"sell",
+    "price":0.0026896,
+    "amount":0.1,
+    "cost":0.00026896,
+    "filled":0.1,
+    "remaining":0,
+    "status":"closed",
+    "fee":{
+        "cost":2.7e-7,
+        "currency":"BTC"
+    },
+    "trades":[
+        {
+            "order":"5b0430f0f773770f4aa46b3a",
+            "info":{
+                "createdAt":1527001329000,
+                "amount":0.1,
+                "dealValue":0.00026896,
+                "fee":2.7e-7,
+                "dealPrice":0.00268962,
+                "feeRate":0.001
+            },
+            "timestamp":1527001329000,
+            "datetime":"2018-05-22T15:02:09.000Z",
+            "symbol":"GAS/BTC",
+            "side":"sell",
+            "price":0.00268962,
+            "cost":0.00026896,
+            "amount":0.1,
+            "fee":{
+                "cost":2.7e-7,
+                "currency":"GAS"
+            }
+        }
+    ]
+}
+
+Open order
+----------
+
+{
+    "info":{
+        "coinType":"GAS",
+        "dealValueTotal":0,
+        "feeTotal":0,
+        "userOid":"5a54cb07130e183273bd96ec",
+        "dealAmount":0,
+        "coinTypePair":"BTC",
+        "type":"SELL",
+        "orderOid":"5b0bd23cf77377090d13bdf2",
+        "createdAt":1527501373000,
+        "dealOrders":{
+            "total":0,
+            "firstPage":true,
+            "lastPage":false,
+            "datas":[
+
+            ],
+            "currPageNo":1,
+            "limit":20,
+            "pageNos":1
+        },
+        "dealPriceAverage":0,
+        "orderPrice":0.00924542,
+        "pendingAmount":0.5
+    },
+    "id":"5b0bd23cf77377090d13bdf2",
+    "timestamp":1527501373000,
+    "datetime":"2018-05-28T09:56:13.000Z",
+    "symbol":"GAS/BTC",
+    "type":"limit",
+    "side":"sell",
+    "price":0.00924542,
+    "amount":0.5,
+    "cost":0.00462271,
+    "filled":0,
+    "remaining":0.5,
+    "status":"open",
+    "fee":{
+        "cost":0,
+        "currency":"BTC"
+    },
+    "trades":[
+
+    ]
+}
+
+*/
+async getOrder(orderNumber, pair, ccxtParams)
+{
+    let ccxtPair;
+    if (undefined !== pair)
+    {
+        ccxtPair = this._toCcxtPair(pair);
+    }
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchOrder(orderNumber, ccxtPair, ccxtParams);
+    }
+    catch (e)
+    {
+        if (e instanceof ccxt.BaseError)
+        {
+            throw new CcxtErrors.BaseError(e, undefined, undefined, undefined);
+        }
+        throw e;
+    }
+    let isClosed = true;
+    if (data.hasOwnProperty('status'))
+    {
+        if ('open' == data['status'])
+        {
+            isClosed = false;
+        }
+    }
+    // order is still open
+    else if (data.hasOwnProperty('remaining') && remaining > 0)
+    {
+        isClosed = false;
+    }
+    if (!isClosed)
+    {
+        return {ccxt:data,custom:this.formatOpenOrder(data)};
+    }
+    // this is a closed order
+    return {ccxt:data,custom:this.formatClosedOrder(data)};
+}
+
+/**
+ * Creates a new order
+ *
+ * @param {string} orderType (buy|sell)
+ * @param {string} pair pair to buy/sell
+ * @param {float} targetRate expected buy/sell price
+ * @param {float} quantity quantity to buy/sell
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object,custom:object}
+ */
+/*
+
+ccxt output for createOrder
+
+{
+    "info":{
+        "success":true,
+        "code":"OK",
+        "msg":"OK",
+        "timestamp":1527504951508,
+        "data":{
+            "orderOid":"5b0be037f7737741ee125577"
+        }
+    },
+    "id":"5b0be037f7737741ee125577",
+    "timestamp":1527504951508,
+    "datetime":"2018-05-28T10:55:51.508Z",
+    "symbol":"GAS/BTC",
+    "type":"limit",
+    "side":"sell",
+    "amount":0.1,
+    "price":0.00924542,
+    "cost":0.0009245420000000001,
+    "status":"open"
+}
+
+*/
+async createOrder(orderType, pair, targetRate, quantity, ccxtParams)
+{
+    let ccxtPair = this._toCcxtPair(pair);
+    let data;
+    try
+    {
+        data = await this.ccxt.createOrder(ccxtPair, 'limit', orderType, quantity, targetRate, ccxtParams);
+    }
+    catch (e)
+    {
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatNewOrder(data)};
+}
+
+/**
+ * Formats a new order returned by ccxt
+ *
+ * @param {object} ccxtData new order returned by ccxt createOrder
+ * @return {object} {orderNumber:string}
+ */
+formatNewOrder(ccxtData)
+{
+    return {orderNumber:ccxtData.id};
+}
+
+/**
+ * Cancels an existing order
+ *
+ * @param {string} orderNumber number of the order to cancel
+ * @param {string} pair pair (ex: USDT-NEO) (if exchange supports retrieving an order without the pair, value will be undefined)
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object,custom:object}
+ */
+/*
+
+ccxt output for cancelOrder : none as ccxt classed will return the raw output from exchange
+
+*/
+async cancelOrder(orderNumber, pair, ccxtParams)
+{
+    let ccxtPair;
+    if (undefined !== pair)
+    {
+        ccxtPair = this._toCcxtPair(pair);
+    }
+    let data;
+    try
+    {
+        data = await this.ccxt.cancelOrder(orderNumber, ccxtPair, ccxtParams);
+    }
+    catch (e)
+    {
+        throw e;
+    }
+    // we don't have any custom info to add
+    return {ccxt:data,custom:{}};
+}
+
+/**
+ * Return balances for all currencies (currencies with balance = 0 should be filtered out)
+ *
+ * @param {object} ccxtParams custom parameters (optional, might not be defined)
+ * @return {ccxt:object,custom:object}
+ */
+/*
+ccxt output example for fetchBalances
+
+{
+    "info":[
+        {
+            "coinType":"KCS",
+            "balanceStr":"0.0",
+            "freezeBalance":0,
+            "balance":0,
+            "freezeBalanceStr":"0.0"
+        },
+        {
+            "coinType":"ETH",
+            "balanceStr":"0.0",
+            "freezeBalance":0,
+            "balance":0,
+            "freezeBalanceStr":"0.0"
+        },
+        {
+            "coinType":"GAS",
+            "balanceStr":"1.90343399",
+            "freezeBalance":0.5,
+            "balance":1.90343399,
+            "freezeBalanceStr":"0.5"
+        }
+    ],
+    "KCS":{
+        "free":0,
+        "used":0,
+        "total":0
+    },
+    "ETH":{
+        "free":0,
+        "used":0,
+        "total":0
+    },
+    "GAS":{
+        "free":1.90343399,
+        "used":0.5,
+        "total":2.40343399
+    },
+    "free":{
+        "KCS":0,
+        "ETH":0,
+        "GAS":1.90343399
+    },
+    "used":{
+        "KCS":0,
+        "ETH":0,
+        "GAS":0.5
+    },
+    "total":{
+        "KCS":0,
+        "ETH":0,
+        "GAS":2.40343399
+    }
+}
+*/
+async getBalances(ccxtParams)
+{
+    let data;
+    try
+    {
+        data = await this.ccxt.fetchBalance(ccxtParams);
+    }
+    catch (e)
+    {
+        throw e;
+    }
+    return {ccxt:data,custom:this.formatBalances(data)};
+}
+
+/**
+ * Formats balances returned by ccxt
+ *
+ * @param {object} ccxtData result returned by ccxt fetchBalance (currencies with balance = 0 should be filtered out)
+ * @return {object}
+ */
+formatBalances(ccxtData)
+{
+    let result = {};
+    _.forEach(ccxtData.total, (balance, currency) => {
+        if (0 == balance)
+        {
+            return;
+        }
+        result[currency] = this.formatBalance(currency, ccxtData[currency]);
+    });
+    return result;
+}
+
+/**
+ * Formats a single balance entry returned by ccxt
+ *
+ * @param {object} ccxtData currency entry returned by ccxt fetchBalance
+ * @return {object}
+ */
+formatBalance(currency, ccxtData)
+{
+    return {
+        currency:currency,
+        total:ccxtData.total,
+        available:ccxtData.free,
+        onOrders:ccxtData.used
+    }
+}
+
+}
+
+module.exports = DefaultCcxtClient;

@@ -1,13 +1,23 @@
 :toc:
 
+include::errors.adoc[leveloffset=1]
+
 include::config.adoc[leveloffset=1]
 
 include::ui/index.adoc[leveloffset=1]
 
 include::server.adoc[leveloffset=1]
 
-include::coinmarketcap/index.adoc[leveloffset=1]
+include::ws/index.adoc[leveloffset=1]
+
+include::portfolio/index.adoc[leveloffset=1]
+
+include::marketCap/index.adoc[leveloffset=1]
+
+include::fxConverter/index.adoc[leveloffset=1]
 
 include::pushover/index.adoc[leveloffset=1]
 
 include::exchanges/index.adoc[leveloffset=1]
+
+include::unitTests.adoc[leveloffset=1]

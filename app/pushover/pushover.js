@@ -1,17 +1,66 @@
 "use strict";
-
+const _ = require('lodash');
 const chump = require('chump');
+const Errors = require('../errors');
+const AbstractServiceClass = require('../abstract-service');
+
 const util = require('util');
 const logger = require('winston');
-const _ = require('lodash');
 
-class PushOver
+// list of possible priority values
+const supportedPriorities = [
+    'lowest', 'low',
+    'normal',
+    'high',
+    'emergency'
+]
+
+const DEFAULT_PRIORITY = 'normal';
+
+const serviceId = 'pushover';
+const serviceName = 'Push Over';
+
+// list of all possible features (should be enabled by default if supported by class)
+const supportedFeatures = {
+};
+
+class PushOver extends AbstractServiceClass
 {
 
 constructor(config)
 {
+    super(serviceId, serviceName, supportedFeatures, false);
     this._user = config.pushover.user;
     this._client = new chump.Client(config.pushover.token);
+}
+
+isPrioritySupported(priority)
+{
+    return -1 !== supportedPriorities.indexOf(priority);
+}
+
+getSupportedPriorities()
+{
+    return supportedPriorities;
+}
+
+getDefaultPriority()
+{
+    return DEFAULT_PRIORITY;
+}
+
+isValidSoundName(name)
+{
+    try
+    {
+        chump.Sound.validateSoundName(name);
+    }
+    // invalid sound name will throw an exception
+    catch (e)
+    {
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -20,6 +69,8 @@ constructor(config)
 * @param {string} opt.message message to send
 * @param {string} opt.format message format html|text
 * @param {string} opt.title notification title (optional)
+* @param {string} opt.url a supplementary URL to show with your message (optional)
+* @param {string} opt.urlTitle title for your supplementary URL, otherwise just the URL is shown (optional, will be ignored if 'url' is not set)
 * @param {string} opt.sound sound which will be played upon receiving notification (optional)
 * @param {string} opt.device used to send notification to a single device
 * @param {string} opt.priority message priority (lowest, low, normal, high, emergency)
@@ -28,7 +79,7 @@ constructor(config)
 * @param {integer} opt.timestamp can be used to override message timestamp
 * @return {Promise}
 */
-notify(opt)
+async notify(opt)
 {
     let self = this;
     let message;
@@ -78,21 +129,43 @@ notify(opt)
         }
         message = new chump.Message(params);
     }
-    catch (ex)
+    catch (e)
     {
-        if (undefined !== ex.stack)
-        {
-            logger.error(ex.stack);
-        }
-        else
-        {
-            logger.error(ex);
-        }
-        return new Promise((resolve, reject) => {
-            reject({origin:'gateway', error:'An error occurred'});
-        });
+        this._logError(e, 'notify');
+        throw new Errors.GatewayError.InternalError();
     }
-    return this._client.sendMessage(message);
+    let data;
+    try
+    {
+        data = await this._client.sendMessage(message);
+    }
+    catch (e)
+    {
+        if (this._isNetworkError(e))
+        {
+            this.__logNetworkError(e, 'notify');
+            if (this._isTimeoutError(e))
+            {
+                throw new Errors.ServiceError.NetworkError.RequestTimeout(this.getId(), e);
+            }
+            if (this._isDDosProtectionError(e))
+            {
+                throw new Errors.ServiceError.NetworkError.DDosProtection(this.getId(), e);
+            }
+            throw new Errors.ServiceError.NetworkError.UnknownError(this.getId(), e);
+        }
+        if (undefined !== e.errors)
+        {
+            // might be an auth error
+            if ('invalid' == e.user || 'invalid' == e.token)
+            {
+                throw new Errors.ServiceError.Forbidden.InvalidAuthentication(this.getId(), e.errors[0]);
+            }
+            throw new Errors.ServiceError.InvalidRequest.UnknownError(self.getId(), e.errors[0]);
+        }
+        throw new Errors.ServiceError.InvalidRequest.UnknownError(self.getId(), e);
+    }
+    return data;
 }
 
 /**
@@ -131,20 +204,6 @@ getCounter(opt)
         result.resetTimestamp = parseInt(result.resetTimestamp);
     }
     return result;
-}
-
-isValidSoundName(name)
-{
-    try
-    {
-        chump.Sound.validateSoundName(name);
-    }
-    // invalid sound name will throw an exception
-    catch (e)
-    {
-        return false;
-    }
-    return true;
 }
 
 }

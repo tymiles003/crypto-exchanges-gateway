@@ -2,6 +2,8 @@ import React, { Component } from 'react';
 
 //-- components
 import MarketOverviewTickers from '../../components/MarketOverviewTickers';
+import serviceRegistry from '../../lib/ServiceRegistry';
+import starredPairs from '../../lib/StarredPairs';
 
 class MarketOverview extends Component
 {
@@ -9,44 +11,17 @@ class MarketOverview extends Component
 constructor(props) {
    super(props);
    this._starredPairs = [];
+   let list = starredPairs.getStarredPairs();
+   _.forEach(list, (entry) => {
+       let name = serviceRegistry.getExchangeName(entry.exchange);
+       // exchange is not supported anymore
+       if (undefined === name)
+       {
+           return;
+       }
+       this._starredPairs.push(entry);
+   });
    this.state = {}
-   this._loadStarredPairs();
-}
-
-_loadStarredPairs()
-{
-    if (!window.ctx.hasLocalStorage)
-    {
-        return;
-    }
-    let keys = [];
-    for (var i = 0; i < window.localStorage.length; i++)
-    {
-        let key = window.localStorage.key(i);
-        if (!key.startsWith('starredPair:'))
-        {
-            continue;
-        }
-        keys.push(key);
-    }
-    if (0 == keys.length)
-    {
-        return;
-    }
-    let self = this;
-    let pairs = [];
-    _.forEach(keys, (k) => {
-        let data = window.localStorage.getItem(k);
-        if (null === data)
-        {
-            return;
-        }
-        let obj = JSON.parse(data);
-        pairs.push(obj);
-    });
-    this._starredPairs = pairs.sort(function(a,b){
-        return a.timestamp > b.timestamp ? -1 : 1;
-    });
 }
 
 componentWillReceiveProps(nextProps) {}

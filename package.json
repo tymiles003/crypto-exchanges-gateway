@@ -1,6 +1,6 @@
 {
   "name": "crypto-exchanges-gateway",
-  "version": "1.0.0",
+  "version": "1.10.1",
   "description": "Your gateway to the crypto world",
   "main": "gateway.js",
   "scripts": {},
@@ -11,17 +11,33 @@
     "url": "https://github.com/aloysius-pgast/crypto-exchanges-gateway.git"
   },
   "dependencies": {
-    "binance": "https://github.com/aloysius-pgast/binance#master",
+    "big.js": "^5.0.3",
+    "binance": "^1.3.5",
+    "bittrex-signalr-client": "git+https://github.com/aloysius-pgast/bittrex-signalr-client.git#master",
     "body-parser": "^1.17.2",
-    "bottleneck": "^1.16.0",
+    "bottleneck": "^2.3.0",
+    "ccxt": "^1.50.8",
     "chump": "^1.2.0",
+    "compression": "^1.7.1",
+    "css-select": "^2.0.0",
+    "debug": "^3.1.0",
     "express": "^4.15.3",
-    "express-ipfilter": "^0.3.1",
-    "lodash": "^4.17.4",
-    "node-bittrex-api": "^0.7.6",
-    "poloniex-api-node": "^1.6.2",
+    "express-ipfilter": "^1.0.1",
+    "express-ws": "^4.0.0",
+    "htmlparser2": "^3.9.2",
+    "joi": "^13.1.2",
+    "lodash": "^4.17.21",
+    "node-bittrex-api": "^0.8.3",
+    "poloniex-api-node": "^1.9.0",
     "request": "^2.83.0",
+    "retry": "^0.10.1",
+    "sqlite3": "^4.1.0",
     "uuid": "^3.1.0",
-    "winston": "^2.3.1"
+    "winston": "^2.4.5",
+    "ws": "^3.2.0"
+  },
+  "devDependencies": {
+    "mocha": "^8.3.0",
+    "yargs": "^16.2.0"
   }
 }

@@ -1,0 +1,366 @@
+= Unit Tests
+
+Unit tests are located under _test_ directory
+
+== Available unit tests
+
+=== Unit tests for exchanges
+
+Tests cover the following :
+
+* retrieving tickers
+* retrieving order books
+* retrieving trades
+* retrieving klines
+* testing an order
+* retrieving open orders
+* retrieving closed orders
+* retrieving a single order
+* retrieving available balances
+
+[NOTE]
+====
+Optional file _test/config/config.json_ can be used to indicate the pairs having open/closed orders for a given exchange
+
+Unit tests *will not create any orders* automatically
+====
+
+.Examples
+
+[source,json]
+----
+{
+    "binance":{
+        "openOrders":["USDT-NEO"],
+        "closedOrders":["USDT-NEO"]
+    },
+    "poloniex":{
+        "openOrders":["BTC-GAS"],
+        "closedOrders":["BTC-GAS"]
+    },
+    "bittrex":{
+        "openOrders":["USDT-NEO"],
+        "closedOrders":["USDT-NEO"]
+    }
+}
+----
+
+
+=== Unit tests for services
+
+Tests cover the following :
+
+* MarketCap tickers
+* Sending notification using PushOver
+* TickerMonitor alerts
+
+=== Misc unit tests
+
+Tests cover the following :
+
+* WS sessions
+* Gateway services
+
+== Running tests
+
+Tests can be run using one of the _run_ bash scripts under _test_ directory
+
+[source,bash]
+----
+test
+├── run
+└── tests
+    ├── exchanges
+    │   ├── balances
+    │   │   └── run
+    │   ├── closedOrders
+    │   │   └── run
+    │   ├── klines
+    │   │   └── run
+    │   ├── openOrders
+    │   │   ├── run
+    │   │   └── scripts
+    │   ├── order
+    │   │   └── run
+    │   ├── orderBooks
+    │   │   └── run
+    │   ├── pairs
+    │   │   └── run
+    │   ├── run
+    │   ├── testOrder
+    │   │   └── run
+    │   ├── tickers
+    │   │   └── run
+    │   └── trades
+    │       └── run
+    ├── server
+    │   └── run
+    ├── services
+    │   ├── fxConverter
+    │   │   └── run
+    │   ├── marketCap
+    │   │   └── run
+    │   ├── pushover
+    │   │   └── run
+    │   ├── run
+    │   └── tickerMonitor
+    │       └── run
+    ├── sessions
+    │   └── run
+    └── ws
+        └── run
+----
+
+[NOTE]
+====
+Every _run_ script will run all tests in sub-directories
+====
+
+== Environment variables
+
+Test suites can be customized through environment variables :
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+
+|Name
+|Type
+|Default
+|Description
+
+|GATEWAY_URI
+|string
+|http://127.0.0.1:8000
+|Used to define gateway http uri
+
+|GATEWAY_WS_URI
+|string
+|ws://127.0.0.1:8001
+|Used to define gateway ws uri
+
+|API_KEY
+|string
+|_undefined_
+|In case an API key is configured on gateway to restrict access
+
+|EXCHANGES
+|string[] (comma-separated)
+|_undefined_
+|Used to only perform unit testing for a list of exchanges. By default, all enabled exchanges will be processed
+
+|TRACE
+|string or integer[] (comma-separated)
+|_undefined_
+|Used to trace all http requests made to the gateway (disabled by default)
+
+* If value is _ALL_, all requests will be traced
+* If value is a comma-separated list of HTTP codes, only requests for those http codes will be traced
+
+|TRACE_DIR
+|string
+|_temporary directory of the OS_
+|Directory where trace should be saved
+
+
+|===
+
+== Traces
+
+When traces are enabled, informations regarding each REST request will be saved to disk
+
+.Examples
+
+Example to run all tests for _MarketCap_ module, with traces
+
+[source,bash]
+----
+cd test/tests/services/marketCap
+TRACE=ALL ./run
+----
+
+It should generate an output similar to
+
+[source,bash]
+----
+Traces will be saved in '/tmp/20181112_115607_29081'
+Please wait during initialization...
+
+
+/marketCap
+  GET /marketCap/symbols
+    ✓ it should return the list of symbols (344ms)
+  GET /marketCap/coins
+    ✓ it should return the list of coins (59ms)
+  GET /marketCap/coins {"symbols":["BTC","ETH"]}
+    ✓ it should return a list of coins containing only BTC & ETH
+  GET /marketCap/tickers
+    ✓ it should return first 100 tickers
+  GET /marketCap/tickers {"limit":5}
+    ✓ it should return first 5 tickers
+  GET /marketCap/tickers/BTC
+    ✓ it should return a single ticker for BTC
+  GET /marketCap/tickers/INVALID
+    ✓ it should fail with a 404 error (GatewayError.InvalidRequest.ObjectNotFound) when requesting a single ticker for an invalid symbol
+  GET /marketCap/tickers {"symbols":["BTC","ETH"]}
+    ✓ it should return tickers for BTC & ETH
+
+
+8 passing (469ms)
+----
+
+Directory _/tmp/20181112_115607_29081_ will contain traces for each REST request
+
+[source,bash]
+----
+.
+└── marketCap
+    ├── GET_marketCap.coins
+    │   ├── 001_200
+    │   │   ├── request.json
+    │   │   └── response.json
+    │   └── 002_200
+    │       ├── request.json
+    │       └── response.json
+    ├── GET_marketCap.symbols
+    │   └── 001_200
+    │       ├── request.json
+    │       └── response.json
+    ├── GET_marketCap.tickers
+    │   ├── 001_200
+    │   │   ├── request.json
+    │   │   └── response.json
+    │   ├── 002_200
+    │   │   ├── request.json
+    │   │   └── response.json
+    │   └── 003_200
+    │       ├── request.json
+    │       └── response.json
+    ├── GET_marketCap.tickers.BTC
+    │   └── 001_200
+    │       ├── request.json
+    │       └── response.json
+    └── GET_marketCap.tickers.INVALID
+        └── 001_404
+            ├── request.json
+            └── response.json
+----
+
+Content of _/tmp/20181112_115607_29081/marketCap/GET_marketCap.tickers/003_200/request.json_
+
+[source,json]
+----
+{
+    "method": "GET",
+    "path": "/marketCap/tickers",
+    "timestamp": 1542020170.07,
+    "params": {
+        "symbols": [
+            "BTC",
+            "ETH"
+        ]
+    },
+    "json": false
+}
+----
+
+Content of _/tmp/20181112_115607_29081/marketCap/GET_marketCap.tickers/003_200/response.json_
+
+[source,json]
+----
+{
+    "httpCode": 200,
+    "body": [
+        {
+            "symbol": "BTC",
+            "name": "Bitcoin",
+            "circulating_supply": 17372012,
+            "price_usd": 6406.1049,
+            "percent_change_1h": -0.08,
+            "percent_change_1d": -0.08,
+            "percent_change_7d": -0.15,
+            "volume_24h_usd": 3120534126.1266,
+            "last_updated": 1542009997,
+            "market_cap_usd": 111286930723.4185,
+            "rank": 1,
+            "price_btc": 1
+        },
+        {
+            "symbol": "ETH",
+            "name": "Ethereum",
+            "circulating_supply": 103150460,
+            "price_usd": 210.4854,
+            "percent_change_1h": -0.39,
+            "percent_change_1d": -0.39,
+            "percent_change_7d": -0.8,
+            "volume_24h_usd": 1294093048.2094,
+            "last_updated": 1542009997,
+            "market_cap_usd": 21711669585.6914,
+            "rank": 2,
+            "price_btc": 0.032857
+        }
+    ],
+    "timestamp": 1542020170.073,
+    "duration": 3
+}
+----
+
+== Examples
+
+=== Running all tests
+
+In order to run all tests, script _run_ in _test_ directory should be started
+
+[source,bash]
+----
+cd test
+./run
+----
+
+=== Running only tests related to _Push Over_, providing an API key
+
+[source,bash]
+----
+cd test/tests/services/pushover
+API_KEY=myapikey ./run
+----
+
+=== Running only exchanges related tests for _Binance_ & _Bittrex_, providing an API key
+
+[source,bash]
+----
+cd test/tests/exchanges
+API_KEY=myapikey EXCHANGES=binance,bittrex ./run
+----
+
+== Testing order creation
+
+In order to test order creation, script _test/test/tests/exchanges/openOrders/scripts/createOrder_ can be used
+
+[source,bash]
+----
+cd test/tests/exchanges/openOrders/scripts
+./createOrder -h
+Options:
+  --help, -h        display help                                       [boolean]
+  --exchange, -e    exchange identifier                               [required]
+  --orderType, -t   orderType (buy|sell)     [required] [choices: "buy", "sell"]
+  --pair, -p        pair (X-Y)                                        [required]
+  --targetRate, -r  target rate (float)
+  --quantity, -q    quantity to buy/sell (float)
+  --uri, -u         base gateway uri (http://{host}:{port})
+                                              [default: "http://127.0.0.1:8000"]
+  --apiKey, -k      API key declared on gateway
+  --dry             only simulate orders
+----
+
+When provided with _quantity_ & _rate_, script will perform the following :
+
+* try to create order
+* automatically cancel order if it was successfully created
+
+Otherwise, script will perform the following :
+
+* try to create an order with an invalid _quantity_ or invalid _rate_ (ie: < min)
+* compute _targetRate_ as _lowest(ask) / 10_ for _buy_ order and _highest(bid) * 10_ for _sell_ orders (to ensure order will stay open)
+* try to create an order with a valid _quantity_
+* automatically cancel order if it was successfully created

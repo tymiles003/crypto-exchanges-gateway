@@ -5,6 +5,7 @@ import restClient from '../../lib/RestClient';
 import dateTimeHelper from '../../lib/DateTimeHelper';
 import serviceRegistry from '../../lib/ServiceRegistry';
 import routeRegistry from '../../lib/RouteRegistry';
+import starredPairs from '../../lib/StarredPairs';
 import ComponentLoadingSpinner from '../../components/ComponentLoadingSpinner';
 
 class DashBoard extends Component
@@ -65,40 +66,18 @@ _loadData()
 
 _loadStarredPairs()
 {
-    if (!window.ctx.hasLocalStorage)
-    {
-        return;
-    }
-    let keys = [];
-    for (var i = 0; i < window.localStorage.length; i++)
-    {
-        let key = window.localStorage.key(i);
-        if (!key.startsWith('starredPair:'))
-        {
-            continue;
-        }
-        keys.push(key);
-    }
-    if (0 == keys.length)
-    {
-        return;
-    }
-    let self = this;
-    let pairs = [];
-    _.forEach(keys, (k) => {
-        let data = window.localStorage.getItem(k);
-        if (null === data)
+    this._starredPairs = [];
+    let list = starredPairs.getStarredPairs();
+    _.forEach(list, (entry) => {
+        // update url
+        entry.url = this._baseUrlList[entry.exchange] + entry.pair;
+        entry.exchangeName = serviceRegistry.getExchangeName(entry.exchange);
+        // exchange is not supported anymore
+        if (undefined === entry.exchangeName)
         {
             return;
         }
-        let obj = JSON.parse(data);
-        // update url
-        obj.url = self._baseUrlList[obj.exchange] + obj.pair;
-        obj.exchangeName = serviceRegistry.getExchangeName(obj.exchange);
-        pairs.push(obj);
-    });
-    this._starredPairs = pairs.sort(function(a,b){
-        return a.timestamp > b.timestamp ? -1 : 1;
+        this._starredPairs.push(entry);
     });
 }
 
@@ -151,7 +130,7 @@ render()
         let startTimestamp = new Date().getTime() - this.state.data.uptime * 1000;
         return (
           <div className="text-success">
-            Gateway is running since {dateTimeHelper.formatDateTime(startTimestamp)}
+            Gateway is running since {dateTimeHelper.formatDateTime(startTimestamp)} (version {this.state.data.version})
           </div>
         )
     }

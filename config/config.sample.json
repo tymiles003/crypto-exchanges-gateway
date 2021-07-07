@@ -3,11 +3,21 @@
         "ipaddr":"127.0.0.1",
         "port":8000
     },
+    "listenWs":{
+        "ipaddr":"127.0.0.1",
+        "port":8001
+    },
+    "userAgent":{
+        "value":"Mozilla/6.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1"
+    },
     "ui":{
         "enabled":true
     },
     "logLevel":"warn",
-    "coinmarketcap":{
+    "marketCap":{
+        "enabled":true
+    },
+    "fxConverter":{
         "enabled":true
     },
     "pushover":{
@@ -15,21 +25,73 @@
         "user":"",
         "token":""
     },
+    "tickerMonitor":{
+        "enabled":true
+    },
     "exchanges":{
         "poloniex":{
+            "type":"poloniex",
+            "name":"Poloniex",
             "enabled":true,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "bittrex":{
+            "type":"bittrex",
+            "name":"Bittrex",
             "enabled":true,
+            "ignoreRestrictedPairs":false,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
             "key":"",
             "secret":""
         },
         "binance":{
+            "type":"binance",
+            "name":"Binance",
             "enabled":true,
+            "requirePair":false,
             "key":"",
             "secret":""
+        },
+        "kucoin":{
+            "type":"kucoin",
+            "name":"Kucoin",
+            "enabled":true,
+            "verbose":false,
+            "timeout":10000,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
+            "key":"",
+            "secret":"",
+            "password":""
+        },
+        "okex":{
+            "type":"okex",
+            "name":"OKEx",
+            "enabled":true,
+            "emulatedWs":{
+                "wsKlines":{
+                    "enabled":true
+                }
+            },
+            "verbose":false,
+            "timeout":10000,
+            "requirePair":false,
+            "key":"",
+            "secret":"",
+            "password":""
         }
     }
 }

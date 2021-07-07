@@ -1,0 +1,173 @@
+= Endpoints
+
+[NOTE]
+====
+All examples below assume that gateway is listening for WS connection on _127.0.0.1:8001_ and that _wscat_ is available
+====
+
+== Endpoints for a single pair
+
+=== Tickers endpoints
+
+_ws://{ipaddr}:{port}/exchanges/{exchange}/tickers/{pair}_
+
+This type of endpoint can be used to listen to _ticker_ notifications for a single pair, on a single exchange
+
+.Examples
+
+Example to listen to _USDT-NEO_ tickers notifications on _bittrex_ exchange
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/exchanges/bittrex/tickers/USDT-NEO'
+----
+
+=== Order books endpoints
+
+_ws://{ipaddr}:{port}/exchanges/{exchange}/orderBooks/{pair}_
+
+This type of endpoint can be used to listen to _orderBook_ & _orderBookUpdate_ notifications for a single pair, on a single exchange
+
+.Examples
+
+Example to listen to _USDT-NEO_ order books notifications on _bittrex_ exchange
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/exchanges/bittrex/orderBooks/USDT-NEO'
+----
+
+=== Trades endpoints
+
+_ws://{ipaddr}:{port}/exchanges/{exchange}/trades/{pair}_
+
+This type of endpoint can be used to listen to _trades_ event for a single pair, on a single exchange
+
+.Examples
+
+Example to listen to _USDT-NEO_ trades notifications on _bittrex_ exchange
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/exchanges/bittrex/trades/USDT-NEO'
+----
+
+=== Klines endpoints
+
+_ws://{ipaddr}:{port}/exchanges/{exchange}/klines/{pair}_
+
+This type of endpoint can be used to listen to _kline_ event for a single pair, on a single exchange
+
+**Optional query parameters**
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+|Name
+|Type
+|Default
+|Description
+
+|interval
+|string
+|_Depends on exchange_
+|Klines interval (ex: _5m_)
+
+|===
+
+.Examples
+
+Example to listen to _USDT-NEO_ klines notifications on _binance_ exchange
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/exchanges/binance/klines/USDT-NEO?interval=5m'
+----
+
+=== TickerMonitor endpoint
+
+[NOTE]
+====
+This endpoint will only be available it _tickerMonitor_ is _enabled_ in config
+====
+
+_ws://{ipaddr}:{port}/tickerMonitor?types=string&emit=boolean_
+
+This type of endpoint can be used to listen to _tickerMonitor_ event
+
+**Optional query parameters**
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+|Name
+|Type
+|Default
+|Description
+
+|types
+|string
+|active
+|Comma-separated string of types (_active_,_inactive_).
+
+* If _active_ is set, an event will be emitted whenever an entry becomes _active_
+* If _inactive_ is set, an event will be emitted whenever an entry becomes _inactive_
+
+|emit
+|boolean
+|false
+|When _true_ an event will be emitted for each _active_ and/or _inactive_ (depending on _types_ parameter) entry upon connection
+
+|===
+
+.Examples
+
+Example to receive a _tickerMonitor_ event everytime a _TickerMonitor_ entry becomes _active_
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/tickerMonitor?types=active
+----
+
+== RPC endpoint
+
+_ws://{ipaddr}:{port}_
+
+=== Optional query parameters
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+
+|Name
+|Type
+|Default
+|Description
+
+|sid
+|string
+|_undefined_
+|Session id (used to connect to an existing session)
+
+|expires
+|boolean
+|true
+|Whether or not session will expire after all WS connections have been closed
+
+|timeout
+|integer
+|600
+|Number of second to wait before marking session as expired, after all WS connections have been closed (will be ignored if _expires_ is _false_)
+
+|===
+
+[NOTE]
+====
+See link:rpc.adoc[RPC protocol documentation] for a list of supported methods
+====
+
+.Examples
+
+Example to open an RPC connection to session _12345_
+
+[source,bash]
+----
+wscat --connect 'ws://127.0.0.1:8001/?sid=12345'
+----

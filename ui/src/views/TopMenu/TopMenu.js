@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import classNames from 'classnames';
 import serviceRegistry from '../../lib/ServiceRegistry';
 import routeRegistry from '../../lib/RouteRegistry';
+import standaloneContext from '../../lib/StandaloneContext';
 import axios from 'axios';
 
 class TopMenu extends Component
@@ -86,7 +87,7 @@ _buildExchangeNavList(route, viewNames)
 {
     let navList = [];
     let routes = routeRegistry.getExchangesRoutes(route.exchange)[route.exchange];
-    let routeNames = ['prices','orderBooks','myOrders','newOrder','myBalances'];
+    let routeNames = ['prices','orderBooks','myOrders','allMyOrders','newOrder','myBalances'];
     _.forEach(routeNames, function(name){
         if (route.name == name || undefined === routes[name] || undefined === viewNames[name])
         {
@@ -114,6 +115,24 @@ _updateStateFromRoute(props)
         {
             helpId = route.name;
         }
+        // save route for standalone app on ios
+        if (standaloneContext.isSupported())
+        {
+            let opt = undefined;
+            if ('exchange' === route.type) {
+                opt = {exchange:route.exchange, supportsPair:false};
+                switch (route.name)
+                {
+                    case 'prices':
+                    case 'orderBooks':
+                    case 'newOrder':
+                    case 'myOrders':
+                        opt.supportsPair = true;
+                        break;
+                }
+            }
+            standaloneContext.setRoute(route.path, opt);
+        }
         if ('exchange' === route.type)
         {
             title = serviceRegistry.getExchangeName(route.exchange);
@@ -122,6 +141,7 @@ _updateStateFromRoute(props)
                 'prices':'Prices',
                 'orderBooks':'Order Books',
                 'myOrders':'My Orders',
+                'allMyOrders':'All My Orders',
                 'newOrder':'New Orders',
                 'myBalances':'My Balances'
             }
@@ -138,6 +158,10 @@ _updateStateFromRoute(props)
         else if ('service' == route.type)
         {
             title = serviceRegistry.getServiceName(route.service);
+            if (undefined !== route.name && 'default' !== route.name)
+            {
+                title = route.name;
+            }
         }
         else if (undefined !== route.name)
         {
@@ -149,6 +173,22 @@ _updateStateFromRoute(props)
                 case 'marketoverview':
                     title = 'Market Overview';
                     helpId = 'marketOverview';
+                    break;
+                case 'portfolio':
+                    title = 'My Portfolio';
+                    helpId = 'portfolio';
+                    break;
+                case 'settings':
+                    title = 'Settings';
+                    helpId = 'settings';
+                    break;
+                case 'myStreams':
+                    title = 'My Streams';
+                    helpId = 'myStreams';
+                    break;
+                case 'myAlerts':
+                    title = 'My Alerts';
+                    helpId = 'myAlerts';
                     break;
             }
         }
@@ -221,7 +261,7 @@ render(){
             <div className="animated fadeIn" style={{paddingLeft:'30px',width:'80%'}}>
                 <br/>
                 <div style={{border:'2px solid #55595a',color:'#55595a',borderRadius:'10px',paddingTop:'15px',paddingLeft:'15px'}}>
-                    <ReactMarkdown source={this.state.help.content}/>
+                    <ReactMarkdown skipHtml={false} escapeHtml={false} source={this.state.help.content}/>
                 </div>
             </div>
         )

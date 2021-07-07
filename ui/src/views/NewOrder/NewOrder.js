@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 import restClient from '../../lib/RestClient';
 import serviceRegistry from '../../lib/ServiceRegistry';
+import dataStore from '../../lib/DataStore';
 
 //-- components
 import DemoModeWarning from '../../components/DemoModeWarning';
@@ -32,6 +33,11 @@ constructor(props) {
            quantity = floatValue.toFixed(8);
        }
    }
+   let pair = undefined === this.props.match.params.pair ? null : this.props.match.params.pair;
+   if (null === pair)
+   {
+       pair = dataStore.getExchangeData(this.props.data.exchange, 'pair');
+   }
    this.state = {
        exchange:this.props.data.exchange,
        pairs:{
@@ -41,27 +47,31 @@ constructor(props) {
        },
        balances:{
            loaded:false,
+           loading:false,
            loadedTimestamp:0,
            err:null,
            data:null
        },
        ticker:{
            loaded:false,
+           loading:false,
            loadedTimestamp:0,
            err:null,
            data:null
        },
-       pair:undefined === this.props.match.params.pair ? null : this.props.match.params.pair,
+       pair:pair,
        rate:rate,
        quantity:quantity
    };
    this._handleSelectPair = this._handleSelectPair.bind(this);
    this._handleCloseOrder = this._handleCloseOrder.bind(this);
    this._demoMode = false;
+   this._feesPercent = serviceRegistry.getFees(this.props.data.exchange)
 }
 
 _handleSelectPair(pair)
 {
+    let previousPair = this.state.pair;
     this.setState((prevState, props) => {
         return {
             pair:pair,
@@ -69,7 +79,7 @@ _handleSelectPair(pair)
             balances:{loaded:false,loadedTimestamp:0,err:null,data:null}
         };
     }, function(){
-        if (null !== pair)
+        if (null !== pair && previousPair != pair)
         {
             this._loadTicker(pair);
             this._loadBalances(pair);
@@ -168,13 +178,14 @@ _loadBalances(pair)
             return;
         }
         alert(err);
+        let timestamp = new Date().getTime();
         self.setState((prevState, props) => {
             return {pairs:{loaded:true, data:null, err:err, loadedTimestamp:timestamp}};
         });
     });
 }
 
-_loadPairs()
+_loadPairs(cb)
 {
     let self = this;
     restClient.getPairs(this.state.exchange).then(function(data){
@@ -183,8 +194,15 @@ _loadPairs()
             return;
         }
         self.setState((prevState, props) => {
-          return {pairs:{loaded:true, data:data, err:null}};
-        });
+          let pair = self.state.pair;
+          if (undefined === data[pair])
+          {
+            pair = null;
+          }
+          return {pairs:{loaded:true, data:data, err:null},pair:pair};
+      }, function(){
+          cb.call(self);
+      });
     }).catch (function(err){
         if (!self._isMounted)
         {
@@ -201,6 +219,7 @@ componentWillReceiveProps(nextProps)
 {
     let exchange = nextProps.data.exchange;
     this._demoMode = serviceRegistry.checkExchangeDemoMode(exchange);
+    this._feesPercent = serviceRegistry.getFees(exchange);
     let rate = null;
     let quantity = null;
     if (undefined !== nextProps.match.params.rate && !isNaN(nextProps.match.params.rate))
@@ -244,13 +263,14 @@ componentWillReceiveProps(nextProps)
             quantity:quantity
         };
     }, function(){
-        this._loadPairs();
-        // do we already have a pair ? => load ticker
-        if (null !== this.state.pair)
-        {
-            this._loadTicker(this.state.pair);
-            this._loadBalances(this.state.pair);
-        }
+        this._loadPairs(function(){
+            // do we already have a pair ? => load ticker
+            if (null !== this.state.pair)
+            {
+                this._loadTicker(this.state.pair);
+                this._loadBalances(this.state.pair);
+            }
+        });
     });
 }
 
@@ -264,13 +284,21 @@ componentDidMount()
     this._isMounted = true;
     let exchange = this.props.data.exchange;
     this._demoMode = serviceRegistry.checkExchangeDemoMode(exchange);
-    this._loadPairs();
-    // do we already have a pair ? => load ticker & balance
-    if (null !== this.state.pair)
-    {
-        this._loadTicker(this.state.pair);
-        this._loadBalances(this.state.pair);
-    }
+    this._feesPercent = serviceRegistry.getFees(exchange);
+    this._loadPairs(function(){
+        // do we already have a pair ? => load ticker & balance
+        if (null !== this.state.pair)
+        {
+            if (!this.state.ticker.loading && !this.state.ticker.loaded)
+            {
+                this._loadTicker(this.state.pair);
+            }
+            if (!this.state.balances.loading && !this.state.balances.loaded)
+            {
+                this._loadBalances(this.state.pair);
+            }
+        }
+    });
 }
 
 render() {
@@ -304,20 +332,20 @@ render() {
 
     const BuyOrderComponent = () => {
         let arr = this.state.pair.split('-');
-        let classNames = "float-lg-left mr-5";
+        let classNames = "float-lg-left mr-sm-auto mr-md-5";
         return (
             <div className={classNames} style={{minWidth:'40%'}}>
-              <Order orderType="buy" exchange={this.state.exchange} quantity={this.state.quantity} rate={this.state.rate} pair={this.state.pair} ticker={this.state.ticker.data} balance={this.state.balances.data.baseCurrency} balanceCurrency={arr[0]} baseCurrency={arr[0]} currency={arr[1]} onClose={this._handleCloseOrder}/>
+              <Order orderType="buy" exchange={this.state.exchange} feesPercent={this._feesPercent} quantity={this.state.quantity} rate={this.state.rate} pair={this.state.pair} ticker={this.state.ticker.data} balance={this.state.balances.data.baseCurrency} limits={this.state.pairs.data[this.state.pair].limits} balanceCurrency={arr[0]} baseCurrency={arr[0]} currency={arr[1]} onClose={this._handleCloseOrder}/>
             </div>
         )
     }
 
     const SellOrderComponent = () => {
         let arr = this.state.pair.split('-');
-        let classNames = "float-lg-left mr-5";
+        let classNames = "float-lg-left mr-sm-auto mr-md-5";
         return (
             <div className={classNames} style={{minWidth:'40%'}}>
-              <Order orderType="sell" exchange={this.state.exchange} quantity={this.state.quantity} rate={this.state.rate} pair={this.state.pair} ticker={this.state.ticker.data} balance={this.state.balances.data.currency} balanceCurrency={arr[1]} baseCurrency={arr[0]} currency={arr[1]} onClose={this._handleCloseOrder}/>
+              <Order orderType="sell" exchange={this.state.exchange} feesPercent={this._feesPercent} quantity={this.state.quantity} rate={this.state.rate} pair={this.state.pair} ticker={this.state.ticker.data} balance={this.state.balances.data.currency} limits={this.state.pairs.data[this.state.pair].limits} balanceCurrency={arr[1]} baseCurrency={arr[0]} currency={arr[1]} onClose={this._handleCloseOrder}/>
             </div>
         )
     }

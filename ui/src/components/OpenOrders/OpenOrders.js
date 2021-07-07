@@ -2,6 +2,8 @@ import React, { Component } from 'react';
 import restClient from '../../lib/RestClient';
 import dateTimeHelper from '../../lib/DateTimeHelper';
 import routeRegistry from '../../lib/RouteRegistry';
+import serviceRegistry from '../../lib/ServiceRegistry';
+import starredPairs from '../../lib/StarredPairs';
 import ComponentLoadingSpinner from '../../components/ComponentLoadingSpinner';
 import ComponentLoadedTimestamp from '../../components/ComponentLoadedTimestamp';
 
@@ -16,8 +18,10 @@ constructor(props)
         loaded:false,
         loadedTimestamp:0,
         err: null,
+        pair:props.pair,
         data:[]
     };
+    this._withoutPair = true;
     this._pricesBaseUrl = '#';
     this._newOrderBaseUrl = '#';
     this._handleManualRefresh = this._handleManualRefresh.bind(this);
@@ -30,10 +34,10 @@ _getBaseUrls(exchange)
     this._newOrderBaseUrl = '#' + routes[this.props.exchange]['newOrder']['path'] + '/';
 }
 
-_handleCancel(orderNumber)
+_handleCancel(order)
 {
     let self = this;
-    restClient.cancelOrder(this.props.exchange, orderNumber).then(function(data){
+    restClient.cancelOrder(this.props.exchange, order.orderNumber, order.pair).then(function(data){
         self._reloadData();
     }).catch (function(err){
         if (undefined !== err.response && undefined !== err.response.data && undefined !== err.response.data.error)
@@ -50,7 +54,6 @@ _handleManualRefresh()
     this._loadData();
 }
 
-
 _reloadData()
 {
     this.setState((prevState, props) => {
@@ -63,7 +66,22 @@ _reloadData()
 _loadData()
 {
     let self = this;
-    restClient.getOpenOrders(this.props.exchange).then(function(data){
+    let pairs;
+    // no pair
+    if (undefined === this.state.pair)
+    {
+        if (!this._withoutPair)
+        {
+            pairs = _.map(starredPairs.getStarredPairs({exchange:this.props.exchange}), (e) => {
+                return e.pair;
+            });
+        }
+    }
+    else
+    {
+        pairs = [this.state.pair];
+    }
+    restClient.getOpenOrders(this.props.exchange, pairs).then(function(data){
         if (!self._isMounted)
         {
             return;
@@ -100,14 +118,20 @@ componentWillUnmount()
 
 componentWillReceiveProps(nextProps)
 {
-    this._getBaseUrls(nextProps.exchange);
-    this._reloadData();
+    this.setState(function(prevState, props){
+        return {
+            pair:props.pair
+        };
+    }, function(){
+        this._loadData();
+    });
 }
-
 
 componentDidMount()
 {
     this._isMounted = true;
+    let features = serviceRegistry.getExchangeFeatures(this.props.exchange, ['openOrders']);
+    this._withoutPair = features['openOrders'].withoutPair;
     this._getBaseUrls(this.props.exchange);
     this._loadData();
 }
@@ -135,17 +159,29 @@ render()
         return <span style={style}>{s}</span>
     }
 
-    const cancelButton = (orderNumber) => {
+    const cancelButton = (order) => {
         return (
-            <button type="button" className="btn btn-link p-0" onClick={this._handleCancel.bind(this, orderNumber)}>
+            <button type="button" className="btn btn-link p-0" onClick={this._handleCancel.bind(this, order)}>
                 <i className="fa fa-remove" style={{fontSize:'1.2rem',color:'#cc3300'}}></i>
             </button>
         )
     }
 
-    let self = this;
+    const RetrieveOnlyStarredPairs = () => {
+        if (undefined !== this.props.pair || this._withoutPair)
+        {
+            return null
+        }
+        return (
+            <div style={{color:'#e64400'}}>
+                For performance reasons, open orders will be retrieved only for starred pairs
+            </div>
+        )
+    }
+
     return (
       <div className="animated fadeIn col-lg-5 p-0">
+        <RetrieveOnlyStarredPairs/>
         <ComponentLoadedTimestamp timestamp={this.state.loadedTimestamp} err={this.state.err} onManualRefresh={this._handleManualRefresh}/>
         <table className="table table-responsive table-sm" style={{fontSize:'0.80rem'}}>
           <thead className="thead-inverse">
@@ -177,7 +213,7 @@ render()
                     <td className="text-right">{item.quantity.toFixed(8)}</td>
                     <td className={classNamesRemainingQuantity}>{item.remainingQuantity.toFixed(8)}</td>
                     <td className="text-right">{item.targetPrice.toFixed(8)}</td>
-                    <td>{cancelButton(item.orderNumber)}</td>
+                    <td>{cancelButton({orderNumber:item.orderNumber,pair:item.pair})}</td>
                 </tr>
               })
             }

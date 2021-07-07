@@ -18,6 +18,10 @@ Result will be a dictionary
 |integer
 |Uptime in seconds
 
+|version
+|string
+|Gateway version
+
 |===
 
 .Examples
@@ -27,7 +31,8 @@ Example for *GET* _/server/uptime_
 [source,json]
 ----
 {
-    "uptime":"debug"
+    "uptime":36,
+    "version":"1.5.0"
 }
 ----
 
@@ -45,13 +50,13 @@ Result will be a dictionary with two entries :
 [NOTE]
 ====
 * Only enabled exchanges will be present
-* Value for a feature will always be _true_ (if feature is not supported, it won't be in dictionnary)
+* Value for a feature will always be an object _{"enabled":boolean}_
 * When property _demo_ is _true_ for an entry, it means that this exchange or service is running in demo mode and will return *fake/random* data for API calls which require authentication (such as trading API on exchanges)
 ====
 
 .Examples
 
-Example for *GET* _/server/uptime_
+Example for *GET* _/server/services_
 
 [source,json]
 ----
@@ -59,62 +64,434 @@ Example for *GET* _/server/uptime_
     "exchanges":{
         "binance":{
             "id":"binance",
+            /* exchange type, it is possible to define multiple instance of one exchange */
+            "type":"binance",
             "name":"Binance",
-            "demo":false,
             "features":{
-                "tickers":true,
-                "orderBooks":true,
-                "pairs":true,
-                "trades":true,
-                "openOrders":true,
-                "closedOrders":true,
-                "balances":true
-            }
+                "tickers":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving tickers for all pairs with a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false
+                },
+                "wsTickers":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "orderBooks":{
+                    "enabled":true
+                },
+                "wsOrderBooks":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "pairs":{
+                    "enabled":true
+                },
+                "trades":{
+                    "enabled":true
+                },
+                "wsTrades":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "klines":{
+                    "enabled":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "wsKlines":{
+                    "enabled":true,
+                    "emulated":false,
+                    /* supported kline intervals */
+                    "intervals":["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"]
+                },
+                "openOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false
+                },
+                "closedOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false,
+                    /* whether or not it is possible to retrieve all trades using API */
+                    "completeHistory":true
+                },
+                "orders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving an order using only its order number */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve order using only its order number */
+                    "requirePair":false
+                },
+                "balances":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving balances for all pairs using a single request */
+                    "withoutCurrency":true
+                }
+            },
+            "demo":false,
+            "feesPercent":0.1
         },
         "bittrex":{
             "id":"bittrex",
+            /* exchange type, it is possible to define multiple instance of one exchange */
+            "type":"bittrex",
             "name":"Bittrex",
-            "demo":false,
             "features":{
-                "tickers":true,
-                "orderBooks":true,
-                "pairs":true,
-                "trades":true,
-                "openOrders":true,
-                "closedOrders":true,
-                "balances":true
-            }
+                "tickers":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving tickers for all pairs with a single request */
+                    "withoutPair":true
+                },
+                "wsTickers":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "orderBooks":{
+                    "enabled":true
+                },
+                "wsOrderBooks":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "pairs":{
+                    "enabled":true
+                },
+                "trades":{
+                    "enabled":true
+                },
+                "wsTrades":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "klines":{
+                    "enabled":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","5m","30m","1h","1d"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "wsKlines":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving klines periodically through REST API */
+                    "emulated":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","5m","30m","1h","1d"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "openOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":true
+                },
+                "closedOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving closed orders for all pairs using a single request */
+                    "withoutPair":true,
+                    /* whether or not it is possible to retrieve all trades using API */
+                    "completeHistory":false
+                },
+                "orders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving an order using only its order number */
+                    "withoutPair":true
+                },
+                "balances":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving balances for all pairs using a single request */
+                    "withoutCurrency":true
+                }
+            },
+            "demo":false,
+            "feesPercent":0.25
         },
         "poloniex":{
             "id":"poloniex",
+            /* exchange type, it is possible to define multiple instance of one exchange */
+            "type":"poloniex",
             "name":"Poloniex",
-            "demo":false,
             "features":{
-                "tickers":true,
-                "orderBooks":true,
-                "pairs":true,
-                "trades":true,
-                "openOrders":true,
-                "closedOrders":true,
-                "balances":true
-            }
+                "tickers":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving tickers for all pairs with a single request */
+                    "withoutPair":true
+                },
+                "wsTickers":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "orderBooks":{
+                    "enabled":true
+                },
+                "wsOrderBooks":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "pairs":{
+                    "enabled":true
+                },
+                "trades":{
+                    "enabled":true
+                },
+                "wsTrades":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "klines":{
+                    "enabled":true,
+                    /* supported kline intervals */
+                    "intervals":["5m","15m","30m","2h","4h","1d"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "wsKlines":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving klines periodically through REST API */
+                    "emulated":true,
+                    /* supported kline intervals */
+                    "intervals":["5m","15m","30m","2h",4h","1d"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "openOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":true
+                },
+                "closedOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving closed orders for all pairs using a single request */
+                    "withoutPair":true,
+                    /* whether or not it is possible to retrieve all trades using API */
+                    "completeHistory":true
+                },
+                "orders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving an order using only its order number */
+                    "withoutPair":true
+                },
+                "balances":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving balances for all pairs using a single request */
+                    "withoutCurrency":true
+                }
+            },
+            "demo":false,
+            "feesPercent":0.2
+        }
+        "kucoin":{
+            "id":"kucoin",
+            /* exchange type, it is possible to define multiple instance of one exchange */
+            "type":"kucoin",
+            "name":"Kucoin",
+            "features":{
+                "tickers":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving tickers for all pairs with a single request */
+                    "withoutPair":true
+                },
+                "wsTickers":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving tickers periodically through REST API */
+                    "emulated":true,
+                    /* tickers will be retrieved through REST API every 30s */
+                    "period":30
+                },
+                "orderBooks":{
+                    "enabled":true
+                },
+                "wsOrderBooks":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving order books periodically through REST API */
+                    "emulated":true,
+                    /* order books will be retrieved through REST API every 30s */
+                    "period":30
+                },
+                "pairs":{
+                    "enabled":true
+                },
+                "trades":{
+                    "enabled":true
+                },
+                "wsTrades":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving trades periodically through REST API */
+                    "emulated":true,
+                    /* trades will be retrieved through REST API every 30s */
+                    "period":30
+                },
+                "klines":{
+                    "enabled":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","5m","15m","30m","1h","8h","1d","1w"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "wsKlines":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving klines periodically through REST API */
+                    "emulated":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","5m","15m","30m","1h","8h","1d","1w"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "openOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false
+                },
+                "closedOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false,
+                    /* whether or not it is possible to retrieve all trades using API */
+                    "completeHistory":false
+                },
+                "orders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving an order using only its order number */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve order using only its order number */
+                    "requirePair":false
+                },
+                "balances":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving balances for all pairs using a single request */
+                    "withoutCurrency":true
+                }
+            },
+            "demo":false,
+            "feesPercent":0.1
+        },
+        "okex":{
+            "id":"okex",
+            /* exchange type, it is possible to define multiple instance of one exchange */
+            "type":"okex",
+            "name":"OKEx",
+            "features":{
+                "tickers":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving tickers for all pairs with a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false
+                },
+                "wsTickers":{
+                    "enabled":true,
+                    "emulated":false,
+                },
+                "orderBooks":{
+                    "enabled":true
+                },
+                "wsOrderBooks":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "pairs":{
+                    "enabled":true
+                },
+                "trades":{
+                    "enabled":true
+                },
+                "wsTrades":{
+                    "enabled":true,
+                    "emulated":false
+                },
+                "klines":{
+                    "enabled":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","3m","5m","15m","30m","1h","2h","4h","6h","12h","1d","1w"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "wsKlines":{
+                    "enabled":true,
+                    /* it means that exchange does not support ws and that ws stream is simulated by gateway, by retrieving klines periodically through REST API */
+                    "emulated":true,
+                    /* supported kline intervals */
+                    "intervals":["1m","3m","5m","15m","30m","1h","2h","4h","6h","12h","1d","1w"],
+                    /* default kline interval */
+                    "defaultInterval":"5m"
+                },
+                "openOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false
+                },
+                "closedOrders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving open orders for all pairs using a single request */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve tickers for all pairs with a single request */
+                    "requirePair":false,
+                    /* whether or not it is possible to retrieve all trades using API */
+                    "completeHistory":true
+                },
+                "orders":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving an order using only its order number */
+                    "withoutPair":false,
+                    /* if false, gateway will provide a fallback to retrieve order using only its order number */
+                    "requirePair":false
+                },
+                "balances":{
+                    "enabled":true,
+                    /* whether or not exchange supports retrieving balances for all pairs using a single request */
+                    "withoutCurrency":true
+                }
+            },
+            "demo":false,
+            "feesPercent":0.2
         }
     },
     "others":{
-        "coinmarketcap":{
-            "id":"coinmarketcap",
-            "name":"Coin Market Cap",
-            "demo":false,
+        "marketCap":{
+            "id":"marketCap",
+            "name":"Market Cap",
             "features":{
+            },
+            "cfg": {
 
-            }
+            },
+            "demo":false
         },
         "pushover":{
             "id":"pushover",
             "name":"Push Over",
-            "demo":false,
             "features":{
 
+            },
+            "cfg": {
+
+            },
+            "demo":false
+        },
+        "tickerMonitor":{
+            "id":"tickerMonitor",
+            "name":"Ticker Monitor",
+            "features":{
+
+            },
+            "demo":false,
+            "cfg":{
+                "delay":30
             }
         }
     }
@@ -145,33 +522,279 @@ Example for *GET* _/server/statistics_
 ----
 {
     "exchanges":{
-        "fakeExchange":{
-            "getBalances":{
-                "success":2,
-                "failure":0
-            }
-        },
-        "poloniex":{
+        "bittrex":{
             "getPairs":{
-                "success":3,
-                "failure":0
-            },
-            "getOrderBooks":{
-                "success":1,
-                "failure":0
-            },
-            "getTrades":{
-                "success":1,
+                "success":6,
                 "failure":0
             },
             "getTickers":{
                 "success":2,
                 "failure":0
+            },
+            "getTicker":{
+                "success":2,
+                "failure":0
+            },
+            "getOrderBook":{
+                "success":3,
+                "failure":1
+            },
+            "getTrades":{
+                "success":7,
+                "failure":2
+            },
+            "getKlines":{
+                "success":4,
+                "failure":1
+            },
+            "getOpenOrders":{
+                "success":5,
+                "failure":0
+            },
+            "getOpenOrder":{
+                "success":2,
+                "failure":0
+            },
+            "testOrder":{
+                "success":14,
+                "failure":0
+            },
+            "getClosedOrders":{
+                "success":3,
+                "failure":0
+            },
+            "getClosedOrder":{
+                "success":1,
+                "failure":0
+            },
+            "getBalances":{
+                "success":1,
+                "failure":0
+            },
+            "getBalance":{
+                "success":1,
+                "failure":0
+            }
+        },
+        "binance":{
+            "getPairs":{
+                "success":6,
+                "failure":0
+            },
+            "getTickers":{
+                "success":1,
+                "failure":1
+            },
+            "getTicker":{
+                "success":3,
+                "failure":0
+            },
+            "getOrderBook":{
+                "success":3,
+                "failure":1
+            },
+            "getTrades":{
+                "success":7,
+                "failure":2
+            },
+            "getKlines":{
+                "success":4,
+                "failure":1
+            },
+            "getOpenOrders":{
+                "success":4,
+                "failure":1
+            },
+            "getOpenOrder":{
+                "success":2,
+                "failure":1
+            },
+            "testOrder":{
+                "success":14,
+                "failure":0
+            },
+            "getClosedOrders":{
+                "success":4,
+                "failure":1
+            },
+            "getClosedOrder":{
+                "success":2,
+                "failure":1
+            },
+            "getBalances":{
+                "success":1,
+                "failure":0
+            },
+            "getBalance":{
+                "success":1,
+                "failure":0
+            }
+        },
+        "poloniex":{
+            "getPairs":{
+                "success":6,
+                "failure":0
+            },
+            "getTickers":{
+                "success":2,
+                "failure":0
+            },
+            "getTicker":{
+                "success":2,
+                "failure":0
+            },
+            "getOrderBook":{
+                "success":3,
+                "failure":1
+            },
+            "getTrades":{
+                "success":7,
+                "failure":2
+            },
+            "getKlines":{
+                "success":4,
+                "failure":1
+            },
+            "getOpenOrders":{
+                "success":3,
+                "failure":0
+            },
+            "getOpenOrder":{
+                "success":1,
+                "failure":0
+            },
+            "testOrder":{
+                "success":14,
+                "failure":0
+            },
+            "getClosedOrders":{
+                "success":5,
+                "failure":0
+            },
+            "getClosedOrder":{
+                "success":2,
+                "failure":0
+            },
+            "getBalances":{
+                "success":1,
+                "failure":0
+            },
+            "getBalance":{
+                "success":1,
+                "failure":0
             }
         }
     },
     "others":{
-
+        "marketCap":{
+            "getTickers":{
+                "success":3,
+                "failure":1
+            },
+            "listSymbols":{
+                "success":0,
+                "failure":1
+            }
+        },
+        "pushover":{
+            "notify":{
+                "success":1,
+                "failure":0
+            }
+        },
+        "tickerMonitor":{
+            "getEntries":{
+                "success":2,
+                "failure":0
+            },
+            "createEntry":{
+                "success":1,
+                "failure":7
+            },
+            "getEntry":{
+                "success":5,
+                "failure":1
+            },
+            "updateEntry":{
+                "success":1,
+                "failure":1
+            },
+            "deleteEntries":{
+                "success":1,
+                "failure":0
+            }
+        }
     }
 }
+----
+
+== List all possible REST errors
+
+*GET* _/server/errors_
+
+=== Optional query parameters
+
+[cols="1,1a,1a,3a", options="header"]
+|===
+
+|Name
+|Type
+|Default
+|Description
+
+|format
+|string
+|html
+|Output format
+
+|===
+
+=== Result
+
+If _format_ is _json_, result will be an array of object such as below
+
+[cols="1,1a,3a", options="header"]
+|===
+|Name
+|Type
+|Description
+
+|type
+|string
+|Error type (ex: _ExchangeError.Forbidden.InvalidAuthentication_)
+
+|httpCode
+|integer
+|Expected http code for this error
+
+|description
+|string
+|Describes in which case this error is supposed to be triggered
+
+|===
+
+.Examples
+
+Example for *GET* _/server/errors?format=json_
+
+[source,json]
+----
+[
+    {
+        "type":"ExchangeError.Forbidden.InvalidAuthentication",
+        "httpCode":403,
+        "description":"Used when auth credentials are refused by exchange"
+    },
+    {
+        "type":"ExchangeError.Forbidden.PermissionDenied",
+        "httpCode":403,
+        "description":"Used when exchange request is not allowed"
+    },
+    ...
+    {
+        "type":"ServiceError.NetworkError.UnknownError",
+        "httpCode":503,
+        "description":"Used when an unknown http error occurs when trying to contact service"
+    }
+]
 ----
